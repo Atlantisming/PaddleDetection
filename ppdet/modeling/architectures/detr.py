@@ -20,8 +20,9 @@ import paddle
 from .meta_arch import BaseArch
 from ppdet.core.workspace import register, create
 
-__all__ = ['DETR']
-# Deformable DETR, DINO use the same architecture as DETR
+from ..embedder.clip_utils import build_text_embedding_coco
+
+__all__ = ['DETR', 'OVDETR']
 
 
 @register
@@ -32,8 +33,8 @@ class DETR(BaseArch):
 
     def __init__(self,
                  backbone,
-                 transformer='DETRTransformer',
-                 detr_head='DETRHead',
+                 transformer,
+                 detr_head,
                  post_process='DETRBBoxPostProcess',
                  exclude_post_process=False):
         super(DETR, self).__init__()
@@ -74,13 +75,7 @@ class DETR(BaseArch):
 
         # DETR Head
         if self.training:
-            detr_losses = self.detr_head(out_transformer, body_feats,
-                                         self.inputs)
-            detr_losses.update({
-                'loss': paddle.add_n(
-                    [v for k, v in detr_losses.items() if 'log' not in k])
-            })
-            return detr_losses
+            return self.detr_head(out_transformer, body_feats, self.inputs)
         else:
             preds = self.detr_head(out_transformer, body_feats)
             if self.exclude_post_process:
@@ -89,11 +84,102 @@ class DETR(BaseArch):
             else:
                 bbox, bbox_num = self.post_process(
                     preds, self.inputs['im_shape'], self.inputs['scale_factor'])
-                output = {'bbox': bbox, 'bbox_num': bbox_num}
-                return output
+            return bbox, bbox_num
 
     def get_loss(self):
-        return self._forward()
+        losses = self._forward()
+        losses.update({
+            'loss':
+            paddle.add_n([v for k, v in losses.items() if 'log' not in k])
+        })
+        return losses
 
     def get_pred(self):
-        return self._forward()
+        bbox_pred, bbox_num = self._forward()
+        output = {
+            "bbox": bbox_pred,
+            "bbox_num": bbox_num,
+        }
+        return output
+
+@register
+class OVDETR(BaseArch):
+    __category__ = 'architecture'
+    __inject__ = ['post_process']
+    __shared__ = ['exclude_post_process']
+
+    def __init__(self,
+                 backbone,
+                 transformer,
+                 detr_head,
+                 zeroshot_w,
+                 post_process='DETRBBoxPostProcess',
+                 exclude_post_process=False):
+        super(OVDETR, self).__init__()
+        self.backbone = backbone
+        self.transformer = transformer
+        self.detr_head = detr_head
+        self.zeroshot_w = zeroshot_w
+        self.post_process = post_process
+        self.exclude_post_process = exclude_post_process
+
+    @classmethod
+    def from_config(cls, cfg, *args, **kwargs):
+        # backbone
+        backbone = create(cfg['backbone'])
+        # transformer
+        kwargs = {'input_shape': backbone.out_shape}
+        transformer = create(cfg['transformer'], **kwargs)
+        zeroshot_w = create(cfg['embedder'])
+
+        # head
+        kwargs = {
+            'hidden_dim': transformer.hidden_dim,
+            'nhead': transformer.nhead,
+            'input_shape': backbone.out_shape
+        }
+        detr_head = create(cfg['detr_head'], **kwargs)
+
+        return {
+            'backbone': backbone,
+            'transformer': transformer,
+            "detr_head": detr_head,
+        }
+
+    def _forward(self):
+        # Backbone
+        body_feats = self.backbone(self.inputs)
+
+        # Transformer
+        # pad_mask = self.inputs['pad_mask'] if self.training else None
+        pad_mask = self.inputs['pad_mask']
+        out_transformer, clip_id, memory_feature = self.transformer(body_feats, pad_mask, self.inputs)
+
+        # DETR Head
+        if self.training:
+            return self.detr_head(out_transformer, clip_id, memory_feature, body_feats, self.inputs)
+        else:
+            preds = self.detr_head(out_transformer, memory_feature, body_feats)
+            if self.exclude_post_process:
+                bboxes, logits, masks = preds
+                return bboxes, logits
+            else:
+                bbox, bbox_num = self.post_process(
+                    preds, self.inputs['im_shape'], self.inputs['scale_factor'])
+            return bbox, bbox_num
+
+    def get_loss(self):
+        losses = self._forward()
+        losses.update({
+            'loss':
+            paddle.add_n([v for k, v in losses.items() if 'log' not in k])
+        })
+        return losses
+
+    def get_pred(self):
+        bbox_pred, bbox_num = self._forward()
+        output = {
+            "bbox": bbox_pred,
+            "bbox_num": bbox_num,
+        }
+        return output

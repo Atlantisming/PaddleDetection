@@ -28,7 +28,7 @@ from ppdet.core.workspace import register, serializable
 from ..losses.iou_loss import GIoULoss
 from .utils import bbox_cxcywh_to_xyxy
 
-__all__ = ['HungarianMatcher']
+__all__ = ['HungarianMatcher', 'OVHungarianMatcher']
 
 
 @register
@@ -124,3 +124,94 @@ class HungarianMatcher(nn.Layer):
         return [(paddle.to_tensor(
             i, dtype=paddle.int64), paddle.to_tensor(
                 j, dtype=paddle.int64)) for i, j in indices]
+
+@register
+@serializable
+class OVHungarianMatcher(HungarianMatcher):
+    def __init__(self, *arg, **kwargs):
+        super().__init__(*arg, **kwargs)
+
+    def forward(self, boxes, logits, gt_bbox, gt_class, select_id):
+        r"""
+        Args:
+            boxes (Tensor): [b, query, 4]
+            logits (Tensor): [b, query, num_classes]
+            gt_bbox (List(Tensor)): list[[n, 4]]
+            gt_class (List(Tensor)): list[[n, 1]]
+
+        Returns:
+            A list of size batch_size, containing tuples of (index_i, index_j) where:
+                - index_i is the indices of the selected predictions (in order)
+                - index_j is the indices of the corresponding selected targets (in order)
+            For each batch element, it holds:
+                len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
+        """
+        num_patch = len(select_id)
+        bs, num_queries = boxes.shape[:2]
+
+        num_gts = sum(len(a) for a in gt_class)
+        if num_gts == 0:
+            return [(paddle.to_tensor(
+                [], dtype=paddle.int64), paddle.to_tensor(
+                [], dtype=paddle.int64)) for _ in range(bs)]
+
+        num_queries = num_queries // num_patch
+
+        out_prob_all = paddle.reshape(logits, [bs, num_patch, num_queries, -1])
+        out_bbox_all = paddle.reshape(boxes, [bs, num_patch, num_queries, -1])
+
+        # Also concat the target labels and boxes
+        tgt_ids_all = paddle.concat(gt_class).flatten()
+        tgt_bbox_all = paddle.concat(gt_bbox)
+
+        ans = [[[], []] for _ in range(bs)]
+
+        for index, label in enumerate(select_id):
+            out_prob = F.sigmoid(out_prob_all[:, index, :, :].flatten(0, 1))
+            out_bbox = out_bbox_all[:, index, :, :].flatten(0, 1)
+
+            mask = (tgt_ids_all == label).nonzero().squeeze(1)
+
+            if len(mask) > 0:
+                tgt_bbox = tgt_bbox_all.index_select(mask, axis=0)
+                tgt_ids = tgt_ids_all.index_select(mask, axis=0)
+
+                # Compute the classification cost.
+                neg_cost_class = (1 - alpha) * (out_prob ** gamma) * (-paddle.log(1 - out_prob + 1e-8))
+                pos_cost_class = alpha * ((1 - out_prob) ** gamma) * (-paddle.log(out_prob + 1e-8))
+                cost_class = paddle.gather(
+                pos_cost_class, tgt_ids, axis=1) - paddle.gather(
+                neg_cost_class, tgt_ids, axis=1)
+
+
+            # Compute the L1 cost between boxes
+            cost_bbox = (
+                out_bbox.unsqueeze(1) - tgt_bbox.unsqueeze(0)).abs().sum(-1)
+
+            # Compute the giou cost betwen boxes
+            cost_giou = self.giou_loss(
+                bbox_cxcywh_to_xyxy(out_bbox.unsqueeze(1)),
+                bbox_cxcywh_to_xyxy(tgt_bbox.unsqueeze(0))).squeeze(-1)
+
+            # Final cost matrix
+            C = self.matcher_coeff['class'] * cost_class + self.matcher_coeff['bbox'] * cost_bbox + \
+                self.matcher_coeff['giou'] * cost_giou
+            C = C.reshape([bs, num_queries, -1])
+            C = [a.squeeze(0) for a in C.chunk(bs)]
+
+        sizes = [a.shape[0] for a in gt_bbox]
+        indices = [
+            linear_sum_assignment(c.split(sizes, -1)[i].numpy())
+            for i, c in enumerate(C)
+        ]
+        for ind in range(bs):
+            x, y = indices[ind]
+            if len(x) == 0:
+                continue
+            x += index * num_queries
+            ans[ind][0] += x.tolist()
+            y_label = (gt_class[ind] == label).nonzero().squeeze(1).cpu().numpy()
+            y_label = y_label[y].tolist()
+            ans[ind][1] += y_label
+        return [(paddle.to_tensor(i, dtype="int64"), paddle.to_tensor(j, dtype="int64"))
+                for i, j in ans]

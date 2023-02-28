@@ -21,7 +21,7 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 from ppdet.core.workspace import register
 import pycocotools.mask as mask_util
-from ..initializer import linear_init_, constant_
+from ..initializer import linear_init_, constant_, xavier_uniform_
 from ..transformers.utils import inverse_sigmoid
 
 __all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead']
@@ -402,3 +402,174 @@ class DINOHead(nn.Layer):
                 dn_meta=dn_meta)
         else:
             return (dec_out_bboxes[-1], dec_out_logits[-1], None)
+
+@register
+class OVDeformableDETRHead(nn.Layer):
+    __shared__ = ['num_classes', 'hidden_dim']
+    __inject__ = ['loss']
+
+    def __init__(self,
+                 num_classes=80,
+                 hidden_dim=1024,
+                 nhead=8,
+                 num_mlp_layers=3,
+                 num_decoder_layer=6,
+                 aux_loss=True,
+                 with_box_refine=False,
+                 two_stage=False,
+                 cls_out_channels=1,
+                 loss='OVDETRLoss'):
+        super(OVDeformableDETRHead, self).__init__()
+        self.num_classes = num_classes
+        self.hidden_dim = hidden_dim
+        self.nhead = nhead
+        self.loss = loss
+        self.cls_out_channels = cls_out_channels
+
+        self.select_id = select_id
+
+        self.score_head = nn.Linear(hidden_dim, cls_out_channels)
+        self.bbox_head = MLP(hidden_dim,
+                             hidden_dim,
+                             output_dim=4,
+                             num_layers=num_mlp_layers)
+        self.feature_align = nn.Linear(256, 512)
+        xavier_uniform_(self.feature_align.weight)
+        constant_(self.feature_align.bias, 0)
+
+        self.aux_loss = aux_loss
+        self.with_box_refine = with_box_refine
+        self.two_stage = two_stage
+
+        self._reset_parameters()
+
+        prior_prob = 0.01
+        bias_value = -math.log((1 - prior_prob) / prior_prob)
+        self.score_head.bias.data = paddle.ones([self.cls_out_channels]) * bias_value
+
+        be_last = len(self.bbox_head.layers) - 1
+        constant_(self.bbox_head.layers[be_last].weight, 0)
+        constant_(self.bbox_head.layers[be_last].bias, 0)
+
+        num_pred = (num_decoder_layer + 1) if two_stage else num_decoder_layer
+        if with_box_refine:
+            self.score_head = _get_clones(self.score_head, num_pred)
+            self.bbox_head = _get_clones(self.bbox_head, num_pred)
+            self.feature_align = _get_clones(self.feature_align, num_pred)
+            constant_(self.bbox_head[0].layers[be_last].bias[2:], -2.0)
+            # hack implementation for iterative bounding box refinement
+            # self.transformer.decoder.bbox_head = self.bbox_head
+        else:
+            constant_(self.bbox_head.layers[be_last].bias[2:], -2.0)
+            self.score_head = nn.LayerList([self.score_head for _ in range(num_pred)])
+            self.bbox_head = nn.LayerList([self.bbox_head for _ in range(num_pred)])
+            self.feature_align = nn.LayerList([self.feature_align for _ in range(num_pred)])
+        if two_stage:
+            # hack implementation for two-stage
+            for box_embed in self.bbox_head:
+                constant_(box_embed.layers[be_last].bias[2:], 0.0)
+
+    def _reset_parameters(self):
+        linear_init_(self.score_head)
+        constant_(self.score_head.bias, -4.595)
+        constant_(self.bbox_head.layers[-1].weight)
+
+        with paddle.no_grad():
+            bias = paddle.zeros_like(self.bbox_head.layers[-1].bias)
+            bias[2:] = -2.0
+            self.bbox_head.layers[-1].bias.set_value(bias)
+
+    @classmethod
+    def from_config(cls, cfg, hidden_dim, nhead, input_shape):
+        return {'hidden_dim': hidden_dim, 'nhead': nhead}
+
+    def forward(self, out_transformer, clip_id, memory_feature, body_feats, inputs=None):
+        r"""
+        Args:
+            out_transformer (Tuple): (feats: [num_levels, batch_size,
+                                                num_queries, hidden_dim],
+                            memory: [batch_size,
+                                \sum_{l=0}^{L-1} H_l \cdot W_l, hidden_dim],
+                            reference_points: [batch_size, num_queries, 2])
+            memory_feature (List(Tensor):
+            body_feats (List(Tensor)): list[[B, C, H, W]]
+            inputs (dict): dict(inputs)
+        """
+        feats, init_reference_points, inter_reference_points, encoder_output_class, enc_outputs_coord_unact = out_transformer
+        select_id, clip_query_ori = clip_id
+        memory = memory_feature
+
+        outputs_classes = []
+        outputs_coords = []
+        outputs_embeds = []
+        for lvl in range(feats.shape[0]):
+            if lvl == 0:
+                reference = init_reference_points
+            else:
+                reference = inter_reference_points[lvl - 1]
+            reference = inverse_sigmoid(reference)
+            outputs_class = self.score_head[lvl](feats[lvl])
+            tmp = self.bbox_head[lvl](feats[lvl])
+            if reference.shape[-1] == 4:
+                tmp += reference
+            else:
+                assert reference.shape[-1] == 2
+                tmp = paddle.concat(
+                    [
+                        tmp[:, :, :, :2] + reference,
+                        tmp[:, :, :, 2:]
+                    ],
+                    axis=-1)
+            outputs_coord = F.sigmoid(tmp)
+
+            outputs_classes.append(outputs_class)
+            outputs_coords.append(outputs_coord)
+            outputs_embeds.append(self.feature_align[lvl](feats[lvl]))
+
+        outputs_class = paddle.stack(outputs_classes)
+        outputs_bbox = paddle.stack(outputs_coords)
+        outputs_embed = paddle.stack(outputs_embeds)
+
+        # It's equivalent to "outputs_bbox[:, :, :, :2] += reference_points",
+        # but the gradient is wrong in paddle.
+
+        out = {
+            "pred_logits": outputs_class[-1],
+            "pred_boxes": outputs_coord[-1],
+            "pred_embed": outputs_embed[-1],
+            "select_id": select_id,
+            "clip_query": clip_query_ori,
+        }
+        if self.aux_loss:
+            out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_coord)
+            for temp, embed in zip(out["aux_outputs"], outputs_embed[:-1]):
+                temp["select_id"] = select_id
+                temp["pred_embed"] = embed
+                temp["clip_query"] = clip_query_ori
+
+        if self.two_stage:
+            enc_outputs_coord = F.sigmoid(enc_outputs_coord_unact)
+            out["enc_outputs"] = {
+                "pred_logits": enc_outputs_class,
+                "pred_boxes": enc_outputs_coord,
+                "select_id": select_id,
+            }
+
+        if self.training:
+            assert inputs is not None
+            assert 'labels' in inputs and 'boxes' in inputs
+
+            return self.loss(out, inputs)
+        else:
+            return (outputs_coord[-1], outputs_class[-1], None)
+
+    def _set_aux_loss(self, outputs_class, outputs_coord):
+        # this is a workaround to make torchscript happy, as torchscript
+        # doesn't support dictionary with non-homogeneous values, such
+        # as a dict having both a Tensor and a list.
+        return [{'pred_logits': a, 'pred_boxes': b}
+                for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
+
+
+def _get_clones(module, N):
+    return nn.LayerList([copy.deepcopy(module) for i in range(N)])
