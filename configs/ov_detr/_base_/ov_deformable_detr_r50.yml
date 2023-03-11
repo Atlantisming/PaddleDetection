@@ -4,10 +4,15 @@ hidden_dim: 256
 use_focal_loss: True
 
 
-DETR:
+OVDETR:
   backbone: ResNet
-  transformer: DeformableTransformer
-  detr_head: DeformableDETRHead
+  neck: ChannelMapper
+  encoder: OVDeformableTransformerEncoder
+  decoder: OVDeformableTransformerDecoder
+  position_embedding: PositionEmbedding
+  detr_head: OVDeformableDETRHead
+  two_stage: True
+  with_box_refine: True
   post_process: DETRBBoxPostProcess
 
 
@@ -20,26 +25,40 @@ ResNet:
   lr_mult_list: [0.0, 0.1, 0.1, 0.1]
   num_stages: 4
 
+ChannelMapper:
+  backbone_num_channels: [512, 1024, 2048]
 
-DeformableTransformer:
-  num_queries: 300
-  position_embed_type: sine
+OVDeformableTransformerEncoder:
+  hidden_dim: 256
   nhead: 8
-  num_encoder_layers: 6
-  num_decoder_layers: 6
   dim_feedforward: 1024
   dropout: 0.1
   activation: relu
   num_feature_levels: 4
   num_encoder_points: 4
+  num_layers: 6
+
+OVDeformableTransformerDecoder:
+  nhead: 8
+  dim_feedforward: 1024
+  dropout: 0.1
+  activation: relu
+  num_feature_levels: 4
   num_decoder_points: 4
+  num_layers: 6
+  cls_out_channels: 2
+  num_mlp_layers: 3
+  return_intermediate: True
+  with_box_refine: True
 
+PositionEmbedding:
+  offset: -0.5
 
-DeformableDETRHead:
+OVDeformableDETRHead:
   num_mlp_layers: 3
 
 
-DETRLoss:
+OVDETRLoss:
   loss_coeff: {class: 2, bbox: 5, giou: 2, mask: 1, dice: 1}
   aux_loss: True
 

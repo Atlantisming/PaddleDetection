@@ -34,6 +34,8 @@ from ..initializer import linear_init_, constant_, xavier_uniform_, normal_
 
 from ..embedder.clip_utils import build_text_embedding_coco
 
+import pickle
+
 __all__ = ['OVDeformableTransformer']
 
 
@@ -435,7 +437,7 @@ class OVDeformableTransformer(nn.Layer):
                  with_box_refine=False,
                  cls_out_channels=2,
                  max_len=15,
-                 clip_feat_path='./pretrained_models/clip_feat_coco_pickle.pkl',
+                 clip_feat_path='./clip_feat_coco_pickle.pkl',
                  prob=0.5,
                  zeroshot_w=build_text_embedding_coco(),
                  weight_attr=None,
@@ -535,8 +537,9 @@ class OVDeformableTransformer(nn.Layer):
 
     def _reset_parameters(self):
         normal_(self.level_embed.weight)
-        normal_(self.tgt_embed.weight)
-        normal_(self.query_pos_embed.weight)
+        # normal_(self.tgt_embed.weight)
+        # normal_(self.query_pos_embed.weight)
+        normal_(self.query_embed.weight)
         if not self.two_stage:
             xavier_uniform_(self.reference_points.weight)
             constant_(self.reference_points.bias)
@@ -636,6 +639,7 @@ class OVDeformableTransformer(nn.Layer):
             mask = mask.flatten(1)
             mask_flatten.append(mask)
         src_flatten = paddle.concat(src_flatten, 1)
+        print('src_flatten', src_flatten)
         mask_flatten = None if src_mask is None else paddle.concat(mask_flatten,
                                                                    1)
         lvl_pos_embed_flatten = paddle.concat(lvl_pos_embed_flatten, 1)
@@ -653,6 +657,7 @@ class OVDeformableTransformer(nn.Layer):
         # encoder
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index,
                               mask_flatten, lvl_pos_embed_flatten, valid_ratios)
+        print('memory', memory)
 
         # prepare for clip_query
         if self.training:

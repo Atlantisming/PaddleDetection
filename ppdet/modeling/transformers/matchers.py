@@ -128,8 +128,9 @@ class HungarianMatcher(nn.Layer):
 @register
 @serializable
 class OVHungarianMatcher(HungarianMatcher):
-    def __init__(self, *arg, **kwargs):
-        super().__init__(*arg, **kwargs)
+
+    def __init__(self):
+        super().__init__()
 
     def forward(self, boxes, logits, gt_bbox, gt_class, select_id):
         r"""

@@ -35,7 +35,7 @@ __all__ = ['SimpleTokenizer', 'tokenize']
 @lru_cache()
 def default_bpe():
     # parent_path = os.path.abspath(os.path.join(__file__, *(['..'] * 5)))
-    parent_path = 'D:\PyWorkspace\PaddleDetection\ppdet\modeling\embedder\clip'
+    parent_path = '/home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/embedder/clip'
     return os.path.join(parent_path, "bpe_simple_vocab_16e6.txt.gz")
 
 

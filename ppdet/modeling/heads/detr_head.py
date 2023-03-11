@@ -24,7 +24,7 @@ import pycocotools.mask as mask_util
 from ..initializer import linear_init_, constant_, xavier_uniform_
 from ..transformers.utils import inverse_sigmoid
 
-__all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead']
+__all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead', 'OVDeformableDETRHead']
 
 
 class MLP(nn.Layer):
@@ -405,7 +405,7 @@ class DINOHead(nn.Layer):
 
 @register
 class OVDeformableDETRHead(nn.Layer):
-    __shared__ = ['num_classes', 'hidden_dim']
+    __shared__ = ['num_classes', 'hidden_dim', 'two_stage']
     __inject__ = ['loss']
 
     def __init__(self,
@@ -415,14 +415,15 @@ class OVDeformableDETRHead(nn.Layer):
                  num_mlp_layers=3,
                  num_decoder_layer=6,
                  aux_loss=True,
-                 with_box_refine=False,
-                 two_stage=False,
+                 with_box_refine=True,
+                 two_stage=True,
                  cls_out_channels=1,
                  loss='OVDETRLoss'):
         super(OVDeformableDETRHead, self).__init__()
         self.num_classes = num_classes
         self.hidden_dim = hidden_dim
         self.nhead = nhead
+        self.two_stage = two_stage
         self.loss = loss
         self.cls_out_channels = cls_out_channels
 
@@ -439,7 +440,6 @@ class OVDeformableDETRHead(nn.Layer):
 
         self.aux_loss = aux_loss
         self.with_box_refine = with_box_refine
-        self.two_stage = two_stage
 
         self._reset_parameters()
 
@@ -451,19 +451,19 @@ class OVDeformableDETRHead(nn.Layer):
         constant_(self.bbox_head.layers[be_last].weight, 0)
         constant_(self.bbox_head.layers[be_last].bias, 0)
 
-        num_pred = (num_decoder_layer + 1) if two_stage else num_decoder_layer
+        self.num_pred = (num_decoder_layer + 1) if two_stage else num_decoder_layer
         if with_box_refine:
-            self.score_head = _get_clones(self.score_head, num_pred)
-            self.bbox_head = _get_clones(self.bbox_head, num_pred)
-            self.feature_align = _get_clones(self.feature_align, num_pred)
+            self.score_head = _get_clones(self.score_head, self.num_pred)
+            self.bbox_head = _get_clones(self.bbox_head, self.num_pred)
+            self.feature_align = _get_clones(self.feature_align, self.num_pred)
             constant_(self.bbox_head[0].layers[be_last].bias[2:], -2.0)
             # hack implementation for iterative bounding box refinement
             # self.transformer.decoder.bbox_head = self.bbox_head
         else:
             constant_(self.bbox_head.layers[be_last].bias[2:], -2.0)
-            self.score_head = nn.LayerList([self.score_head for _ in range(num_pred)])
-            self.bbox_head = nn.LayerList([self.bbox_head for _ in range(num_pred)])
-            self.feature_align = nn.LayerList([self.feature_align for _ in range(num_pred)])
+            self.score_head = nn.LayerList([self.score_head for _ in range(self.num_pred)])
+            self.bbox_head = nn.LayerList([self.bbox_head for _ in range(self.num_pred)])
+            self.feature_align = nn.LayerList([self.feature_align for _ in range(self.num_pred)])
         if two_stage:
             # hack implementation for two-stage
             for box_embed in self.bbox_head:
@@ -480,8 +480,8 @@ class OVDeformableDETRHead(nn.Layer):
             self.bbox_head.layers[-1].bias.set_value(bias)
 
     @classmethod
-    def from_config(cls, cfg, hidden_dim, nhead, input_shape):
-        return {'hidden_dim': hidden_dim, 'nhead': nhead}
+    def from_config(cls, cfg, hidden_dim, nhead, input_shape, two_stage):
+        return {'hidden_dim': hidden_dim, 'nhead': nhead, 'two_stage': two_stage}
 
     def forward(self, out_transformer, clip_id, memory_feature, body_feats, inputs=None):
         r"""

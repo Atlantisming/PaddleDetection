@@ -187,7 +187,7 @@ def json_eval_results(metric, json_directory, dataset):
         else:
             logger.info("{} not exists!".format(v_json))
 
-def cocoapi_eval(jsonfile,
+def zeroshot_cocoapi_eval(jsonfile,
                  style,
                  coco_gt=None,
                  anno_file=None,
@@ -217,6 +217,8 @@ def cocoapi_eval(jsonfile,
         from pycocotools.coco import COCO
         from pycocotools.cocoeval import COCOeval
 
+    unseen_list = [4, 5, 11, 12, 15, 16, 21, 23, 27, 29, 32, 34, 45, 47, 54,
+                   58, 63]
     if coco_gt == None:
         coco_gt = COCO(anno_file)
     logger.info("Start evaluate...")
@@ -247,7 +249,7 @@ def cocoapi_eval(jsonfile,
             if precision.size:
                 ap = np.mean(precision)
                 # print(f"AP {idx}: {ap}")
-                if idx not in self.unseen_list:
+                if idx not in unseen_list:
                     results_seen.append(float(ap * 100))
                 else:
                     results_unseen.append(float(ap * 100))
