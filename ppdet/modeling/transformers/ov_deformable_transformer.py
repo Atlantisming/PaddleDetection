@@ -36,8 +36,31 @@ from ..embedder.clip_utils import build_text_embedding_coco
 
 import pickle
 
-__all__ = ['OVDeformableTransformer']
+__all__ = ['OVDeformableTransformer', 'OVDeformableTransformerEncoder',
+           'OVDeformableTransformerDecoder']
 
+class MLP(nn.Layer):
+    """This code is based on
+        https://github.com/facebookresearch/detr/blob/main/models/detr.py
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.LayerList(
+            nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for l in self.layers:
+            linear_init_(l)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
 
 # 对齐
 class MSDeformableAttention(nn.Layer):
@@ -229,11 +252,18 @@ class DeformableTransformerEncoderLayer(nn.Layer):
 
 
 # 对齐
-class DeformableTransformerEncoder(nn.Layer):
-    def __init__(self, encoder_layer, num_layers):
-        super(DeformableTransformerEncoder, self).__init__()
+@register
+class OVDeformableTransformerEncoder(nn.Layer):
+    def __init__(self, hidden_dim, nhead, dim_feedforward, dropout, activation,
+                num_feature_levels, num_encoder_points, num_layers, weight_attr=None, bias_attr=None):
+        super(OVDeformableTransformerEncoder, self).__init__()
+        encoder_layer = DeformableTransformerEncoderLayer(
+            hidden_dim, nhead, dim_feedforward, dropout, activation,
+            num_feature_levels, num_encoder_points, weight_attr, bias_attr)
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.nhead = nhead
 
     @staticmethod
     def get_reference_points(spatial_shapes, valid_ratios, offset=0.5):
@@ -351,19 +381,38 @@ class DeformableTransformerDecoderLayer(nn.Layer):
 
 
 # 对齐
-class DeformableTransformerDecoder(nn.Layer):
-    def __init__(self, decoder_layer,
+@register
+class OVDeformableTransformerDecoder(nn.Layer):
+    def __init__(self,
+                 nhead,
+                 dim_feedforward,
+                 dropout,
+                 activation,
+                 num_feature_levels,
+                 num_decoder_points,
                  num_layers,
                  cls_out_channels,
+                 hidden_dim=256,
+                 num_mlp_layers=3,
                  return_intermediate=False,
-                 with_box_refine=False):
-        super(DeformableTransformerDecoder, self).__init__()
+                 with_box_refine=False,
+                 weight_attr=None,
+                 bias_attr=None):
+        super(OVDeformableTransformerDecoder, self).__init__()
+        decoder_layer = DeformableTransformerDecoderLayer(
+            hidden_dim, nhead, dim_feedforward, dropout, activation,
+            num_feature_levels, num_decoder_points, weight_attr, bias_attr)
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.return_intermediate = return_intermediate
         # hack implementation for iterative bounding box refinement and two-stage Deformable DETR
         self.bbox_embed = None
         self.class_embed = None
+        # self.score_head = nn.Linear(hidden_dim, cls_out_channels)
+        # self.bbox_head = MLP(hidden_dim,
+        #                      hidden_dim,
+        #                      output_dim=4,
+        #                      num_layers=num_mlp_layers)
 
     def forward(self,
                 tgt,
@@ -409,12 +458,13 @@ class DeformableTransformerDecoder(nn.Layer):
         if self.return_intermediate:
             return paddle.stack(intermediate), paddle.stack(intermediate_reference_points)
 
-        return output.unsqueeze(0), reference_points
+        return output.unsqueeze(0)
 
 
 @register
 class OVDeformableTransformer(nn.Layer):
     __shared__ = ['hidden_dim']
+    # __inject__ = ['head']
 
     def __init__(self,
                  num_queries=300,
@@ -432,14 +482,15 @@ class OVDeformableTransformer(nn.Layer):
                  dropout=0.1,
                  activation="relu",
                  lr_mult=0.1,
-                 two_stage=False,
+                 two_stage=True,
                  two_stage_num_proposals=300,
                  with_box_refine=False,
                  cls_out_channels=2,
                  max_len=15,
-                 clip_feat_path='./clip_feat_coco_pickle.pkl',
+                 clip_feat_path='/home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/transformers/clip_feat_coco_pickle_label.pkl',
                  prob=0.5,
                  zeroshot_w=build_text_embedding_coco(),
+                 # head = 'OVDeformableDETRHead',
                  weight_attr=None,
                  bias_attr=None):
         super(OVDeformableTransformer, self).__init__()
@@ -456,15 +507,15 @@ class OVDeformableTransformer(nn.Layer):
         encoder_layer = DeformableTransformerEncoderLayer(
             hidden_dim, nhead, dim_feedforward, dropout, activation,
             num_feature_levels, num_encoder_points, weight_attr, bias_attr)
-        self.encoder = DeformableTransformerEncoder(encoder_layer,
-                                                    num_encoder_layers)
+        self.encoder = OVDeformableTransformerEncoder(encoder_layer,
+                                                      num_encoder_layers)
 
         decoder_layer = DeformableTransformerDecoderLayer(
             hidden_dim, nhead, dim_feedforward, dropout, activation,
             num_feature_levels, num_decoder_points, weight_attr, bias_attr)
-        self.decoder = DeformableTransformerDecoder(
+        self.decoder = OVDeformableTransformerDecoder(
             decoder_layer, num_decoder_layers, cls_out_channels,
-            return_intermediate_dec, with_box_refine)
+            return_intermediate=return_intermediate_dec, with_box_refine=with_box_refine)
 
         self.level_embed = nn.Embedding(num_feature_levels, hidden_dim)
 
@@ -482,6 +533,7 @@ class OVDeformableTransformer(nn.Layer):
                 2,
                 weight_attr=ParamAttr(learning_rate=lr_mult),
                 bias_attr=ParamAttr(learning_rate=lr_mult))
+            normal_(self.query_embed.weight)
 
         self.input_proj = nn.LayerList()
         for in_channels in backbone_num_channels:
@@ -523,6 +575,7 @@ class OVDeformableTransformer(nn.Layer):
         xavier_uniform_(self.patch2query.weight)
         constant_(self.patch2query.bias, 0)
 
+        # self.head = head
         num_pred = self.decoder.num_layers
 
         self.all_ids = paddle.to_tensor(list(range(self.zeroshot_w.shape[-1])))
@@ -539,7 +592,6 @@ class OVDeformableTransformer(nn.Layer):
         normal_(self.level_embed.weight)
         # normal_(self.tgt_embed.weight)
         # normal_(self.query_pos_embed.weight)
-        normal_(self.query_embed.weight)
         if not self.two_stage:
             xavier_uniform_(self.reference_points.weight)
             constant_(self.reference_points.bias)
@@ -580,7 +632,7 @@ class OVDeformableTransformer(nn.Layer):
         proposals = []
         _cur = 0
         for lvl, (H_, W_) in enumerate(spatial_shapes):
-            mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].reshape((N_, H_, W_, 1))
+            mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].astype('bool').reshape((N_, H_, W_, 1))
             valid_H = paddle.sum(~mask_flatten_[:, :, 0, 0], 1)
             valid_W = paddle.sum(~mask_flatten_[:, 0, :, 0], 1)
 
@@ -639,7 +691,7 @@ class OVDeformableTransformer(nn.Layer):
             mask = mask.flatten(1)
             mask_flatten.append(mask)
         src_flatten = paddle.concat(src_flatten, 1)
-        print('src_flatten', src_flatten)
+        # print('src_flatten', src_flatten)
         mask_flatten = None if src_mask is None else paddle.concat(mask_flatten,
                                                                    1)
         lvl_pos_embed_flatten = paddle.concat(lvl_pos_embed_flatten, 1)
@@ -661,7 +713,8 @@ class OVDeformableTransformer(nn.Layer):
 
         # prepare for clip_query
         if self.training:
-            uniq_labels = paddle.concat([t["gt_class"] for t in inputs])
+            # uniq_labels = paddle.concat([t["gt_class"] for t in inputs])
+            uniq_labels = paddle.concat(inputs["gt_class"])
             uniq_labels = paddle.unique(uniq_labels)
             uniq_labels = uniq_labels[paddle.randperm(len(uniq_labels))][: self.max_len]
             # uniq_labels = uniq_labels[paddle.to_tensor(list(range(len(uniq_labels))))][: self.max_len]
@@ -700,7 +753,7 @@ class OVDeformableTransformer(nn.Layer):
                 clip_query = self.zeroshot_w[:, c * num_patch: (c + 1) * num_patch].t()
                 clip_query = self.patch2query(clip_query.astype(dtype))
 
-        query_embed = None
+        query_embeds = None
         if not self.two_stage:
             query_embeds = self.query_embed.weight
 
@@ -712,8 +765,10 @@ class OVDeformableTransformer(nn.Layer):
                 memory, mask_flatten, spatial_shapes)
 
             # hack implementation for two-stage Deformable DETR
-            enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
-            enc_outputs_coord_unact = self.decoder.bbox_embed[self.decoder.num_layers](output_memory) + output_proposals
+            enc_outputs_class = self.decoder.score_head(output_memory)
+            print('output_proposals',output_proposals)
+            print('self.decoder.bbox_head(output_memory)', self.decoder.bbox_head(output_memory))
+            enc_outputs_coord_unact = self.decoder.bbox_head(output_memory) + output_proposals
             topk = self.two_stage_num_proposals
             topk_proposals = paddle.topk(enc_outputs_class[..., 0], topk, axis=1)[1]
 
@@ -810,7 +865,7 @@ def _get_activation_fn(activation):
         return F.glu
     raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
 
-# 
+#
 # def build_ov_deforamble_transformer(args):
 #     return OVDeformableTransformer(
 #         hidden_dim=args.hidden_dim,
@@ -854,3 +909,4 @@ if __name__ == '__main__':
     #           }
     # args = DictToStruct(**params)
     trans = build_ov_deforamble_transformer()
+

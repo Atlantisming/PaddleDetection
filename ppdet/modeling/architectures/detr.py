@@ -105,6 +105,7 @@ class DETR(BaseArch):
         }
         return output
 
+
 @register
 class OVDETR(BaseArch):
     __category__ = 'architecture'
@@ -117,10 +118,14 @@ class OVDETR(BaseArch):
                  encoder,
                  decoder,
                  detr_head,
-                 # zeroshot_w,
-                 two_stage,
-                 with_box_refine,
-                 num_feature_levels,
+                 position_embedding,
+                 zeroshot_w=build_text_embedding_coco(),
+                 two_stage_num_proposals=300,
+                 two_stage=True,
+                 with_box_refine=True,
+                 num_feature_levels=4,
+                 clip_feat_path='/home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/transformers/clip_feat_coco_pickle_label.pkl',
+                 position_embed_type='sine',
                  post_process='DETRBBoxPostProcess',
                  exclude_post_process=False):
         super(OVDETR, self).__init__()
@@ -130,31 +135,41 @@ class OVDETR(BaseArch):
         self.encoder = encoder
         self.decoder = decoder
         self.detr_head = detr_head
+
+        assert position_embed_type in ['sine', 'learned'], \
+            f'ValueError: position_embed_type not supported {position_embed_type}!'
+        self.position_embedding = position_embedding
+
         self.post_process = post_process
         self.exclude_post_process = exclude_post_process
 
-        # pre_encoder
-        self.position_embedding = position_embedding
+        hidden_dim = encoder.hidden_dim
         # pre_encoder
         # self.position_embedding = PositionEmbedding(
         #     hidden_dim // 2,
         #     normalize=True if position_embed_type == 'sine' else False,
         #     embed_type=position_embed_type,
         #     offset=-0.5)
+
         self.level_embed = nn.Embedding(num_feature_levels, hidden_dim)
 
-        # self.zeroshot_w = zeroshot_w.t()
+        self.zeroshot_w = zeroshot_w.t()
         self.patch2query = nn.Linear(512, 256)
         self.patch2query_img = nn.Linear(512, 256)
         # mark 源码此处for layer in [self.patch2query]:
         xavier_uniform_(self.patch2query.weight)
         constant_(self.patch2query.bias, 0)
+        self.two_stage_num_proposals = two_stage_num_proposals
 
         num_pred = self.decoder.num_layers
         self.all_ids = paddle.to_tensor(list(range(self.zeroshot_w.shape[-1])))
-        self.max_len = max_len
-        self.max_pad_len = max_len - 3
+        self.max_len = 15
+        self.max_pad_len = self.max_len - 3
 
+        with open(clip_feat_path, 'rb') as f:
+            self.clip_feat = pickle.load(f)
+        self.prob = 0.5
+        self.two_stage = two_stage
         if two_stage:
             self.enc_output = nn.Linear(hidden_dim, hidden_dim, bias_attr=True)
             self.enc_output_norm = nn.LayerNorm(hidden_dim)
@@ -182,22 +197,37 @@ class OVDETR(BaseArch):
     def from_config(cls, cfg, *args, **kwargs):
         # backbone
         backbone = create(cfg['backbone'])
+        neck = create(cfg['neck'])
         # transformer
-        kwargs = {'input_shape': backbone.out_shape}
-        transformer = create(cfg['transformer'], **kwargs)
+        # kwargs = {'input_shape': backbone.out_shape}
+        # transformer = create(cfg['transformer'], **kwargs)
         # zeroshot_w = create(cfg['embedder'])
+        position_embed_type = 'sine'
+        kwargs = {
+            'num_pos_feats': 128,  # hidden_dim // 2
+            'normalize': True if position_embed_type == 'sine' else False,
+            'embed_type': position_embed_type
+        }
+        position_embedding = create(cfg['position_embedding'], **kwargs)
+        # print(position_embedding)
 
+        encoder = create(cfg['encoder'])
+        decoder = create(cfg['decoder'])
         # head
         kwargs = {
-            'hidden_dim': transformer.hidden_dim,
-            'nhead': transformer.nhead,
-            'input_shape': backbone.out_shape
+            'hidden_dim': encoder.hidden_dim,
+            'nhead': encoder.nhead,
+            'input_shape': backbone.out_shape,
+            'two_stage': cfg['two_stage'],
         }
         detr_head = create(cfg['detr_head'], **kwargs)
 
         return {
             'backbone': backbone,
-            'transformer': transformer,
+            'neck': neck,
+            'position_embedding': position_embedding,
+            'encoder': encoder,
+            'decoder': decoder,
             "detr_head": detr_head,
         }
 
@@ -206,13 +236,12 @@ class OVDETR(BaseArch):
         body_feats = self.backbone(self.inputs)
 
         # Neck
-        body_feats = self.neck(bodey_feats)
+        body_feats = self.neck(body_feats)
 
         pad_mask = self.inputs['pad_mask'] if self.training else None
-        print(self.inputs)
         # out_transformer, clip_id, memory_feature = self.transformer(body_feats, pad_mask, self.inputs)
         # Transformer
-        encoder_outputs_dict = self.forward_ov_transformer(body_feats)
+        head_inputs_dict = self.forward_ov_transformer(body_feats, pad_mask)
 
         # DETR Head
         if self.training:
@@ -231,7 +260,7 @@ class OVDETR(BaseArch):
         losses = self._forward()
         losses.update({
             'loss':
-            paddle.add_n([v for k, v in losses.items() if 'log' not in k])
+                paddle.add_n([v for k, v in losses.items() if 'log' not in k])
         })
         return losses
 
@@ -243,20 +272,20 @@ class OVDETR(BaseArch):
         }
         return output
 
-    def forward_ov_transformer(self, inputs):
-        encoder_inputs_dict, decoder_inputs_dict = self.pre_encoder(inputs)
+    def forward_ov_transformer(self, inputs, src_mask=None):
+        encoder_inputs_dict, decoder_inputs_dict = self.pre_encoder(inputs, src_mask)
 
         encoder_outputs_dict = self.forward_encoder(**encoder_inputs_dict)
-
-        decoder_inputs_dict_tmp, head_inputs_dict = self.pre_decoder(**decoder_inputs_dict)
+        decoder_inputs_dict_tmp, head_inputs_dict = self.pre_decoder(self.inputs, **encoder_outputs_dict)
         decoder_inputs_dict.update(decoder_inputs_dict_tmp)
+        print(decoder_inputs_dict.keys())
 
         decoder_outputs_dict = self.forward_decoder(**decoder_inputs_dict)
         head_inputs_dict.update(decoder_outputs_dict)
 
         return head_inputs_dict
 
-    def pre_encoder(self, srcs):
+    def pre_encoder(self, srcs, src_mask=None):
         src_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
@@ -267,6 +296,7 @@ class OVDETR(BaseArch):
             spatial_shapes.append(paddle.concat([h, w]))
             src = src.flatten(2).transpose([0, 2, 1])
             src_flatten.append(src)
+
             if src_mask is not None:
                 mask = F.interpolate(src_mask.unsqueeze(0), size=(h, w))[0]
             else:
@@ -276,13 +306,14 @@ class OVDETR(BaseArch):
             lvl_pos_embed = pos_embed + self.level_embed.weight[level]
             lvl_pos_embed_flatten.append(lvl_pos_embed)
             mask = mask.flatten(1)
+
             mask_flatten.append(mask)
         src_flatten = paddle.concat(src_flatten, 1)
-        # print('src_flatten', src_flatten)
         mask_flatten = None if src_mask is None else paddle.concat(mask_flatten,
                                                                    1)
         lvl_pos_embed_flatten = paddle.concat(lvl_pos_embed_flatten, 1)
         # [l, 2]
+
         spatial_shapes = paddle.to_tensor(
             paddle.stack(spatial_shapes).astype('int64'))
         # [l], 每一个level的起始index
@@ -292,6 +323,7 @@ class OVDETR(BaseArch):
         ])
         # [b, l, 2]
         valid_ratios = paddle.stack(valid_ratios, 1)
+
         encoder_inputs_dict = dict(
             src=src_flatten,
             spatial_shapes=spatial_shapes,
@@ -301,7 +333,7 @@ class OVDETR(BaseArch):
             valid_ratios=valid_ratios,
         )
         decoder_inputs_dict = dict(
-            src=src_flatten,
+            mask_flatten=mask_flatten,
             spatial_shapes=spatial_shapes,
             level_start_index=level_start_index,
             valid_ratios=valid_ratios,
@@ -310,24 +342,26 @@ class OVDETR(BaseArch):
 
     def forward_encoder(self,
                         src,
-                        spatial_shape,
+                        spatial_shapes,
                         level_start_index,
                         src_mask,
                         src_pos,
                         valid_ratios,
                         ):
         memory = self.encoder(
-            src,spatial_shape,level_start_index,
-            src_mask,src_pos,valid_ratios,
+            src, spatial_shapes, level_start_index,
+            src_mask, src_pos, valid_ratios,
         )
+
         encoder_outputs_dict = dict(
             memory=memory,
-            memory_mask=src_mask,
-            spatial_shape=spatial_shape,
+            mask_flatten=src_mask,
+            spatial_shapes=spatial_shapes,
         )
         return encoder_outputs_dict
 
     def pre_decoder(self,
+                    inputs,
                     # decoder
                     memory,
                     mask_flatten,
@@ -387,10 +421,12 @@ class OVDETR(BaseArch):
                 memory, mask_flatten, spatial_shapes)
 
             # hack implementation for two-stage Deformable DETR
-            enc_outputs_class = self.detr_head.score_head(output_memory)
-            print('output_proposals', output_proposals)
-            print('self.decoder.bbox_head(output_memory)', self.decoder.bbox_head(output_memory))
-            enc_outputs_coord_unact = self.detr_head.bbox_head(output_memory) + output_proposals
+            # print(self.detr_head)
+            enc_outputs_class = self.detr_head.score_head[self.detr_head.num_decoder_layer](output_memory)
+            # print('output_proposals', output_proposals)
+            # print('self.decoder.bbox_head(output_memory)', self.decoder.bbox_head(output_memory))
+            enc_outputs_coord_unact = self.detr_head.bbox_head[self.detr_head.num_decoder_layer](
+                output_memory) + output_proposals
             topk = self.two_stage_num_proposals
             topk_proposals = paddle.topk(enc_outputs_class[..., 0], topk, axis=1)[1]
 
@@ -440,19 +476,21 @@ class OVDETR(BaseArch):
         # TODO 校对输入输出
         decoder_inputs_dict = dict(
             tgt=tgt,
-            query_embeds=query_embeds,
+            query_embed=query_embeds,
             memory=memory,
             reference_points=reference_points,
+            decoder_mask=decoder_mask,
         )
-        head_inputs_dict=dict(
+        head_inputs_dict = dict(
             enc_outputs_class=enc_outputs_class,
             enc_outputs_coord_unact=enc_outputs_coord_unact,
         )
         return decoder_inputs_dict, head_inputs_dict
 
     def forward_decoder(self, tgt, reference_points, memory,
-            spatial_shapes, level_start_index, valid_ratios,
-            mask_flatten, query_embed):
+                        spatial_shapes, level_start_index, valid_ratios,
+                        mask_flatten, query_embed, decoder_mask):
+        self.decoder.bbox_embed = self.detr_head.bbox_head
         hs, inter_references = self.decoder(
             tgt,
             reference_points,
@@ -462,15 +500,13 @@ class OVDETR(BaseArch):
             valid_ratios,
             mask_flatten,
             query_embed,
-            decoer_mask,
-            bbox_embed,
+            decoder_mask,
         )
         references = [reference_points, *inter_references]
         decoder_outputs_dict = dict(
             hs=hs, references=references
         )
         return decoder_outputs_dict
-
 
     def get_proposal_pos_embed(self, proposals):
         # print(proposals.shape)
@@ -495,7 +531,6 @@ class OVDETR(BaseArch):
         # N, L, 4, 64, 2
         pos = paddle.stack((pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()), axis=4).flatten(2)
         return pos
-
 
     def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes):
         N_, S_, C_ = memory.shape
@@ -529,7 +564,16 @@ class OVDETR(BaseArch):
         output_memory = self.enc_output_norm(self.enc_output(output_memory))
         return output_memory, output_proposals
 
+
 def masked_fill(tensor, mask, value):
     cover = paddle.full_like(tensor, value)
     out = paddle.where(mask, cover, tensor)
     return out
+
+
+def get_valid_ratio(mask):
+    _, H, W = paddle.shape(mask)
+    valid_ratio_h = paddle.sum(mask[:, :, 0], 1) / H
+    valid_ratio_w = paddle.sum(mask[:, 0, :], 1) / W
+    # [b, 2]
+    return paddle.stack([valid_ratio_w, valid_ratio_h], -1)

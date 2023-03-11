@@ -405,7 +405,7 @@ class DINOHead(nn.Layer):
 
 @register
 class OVDeformableDETRHead(nn.Layer):
-    __shared__ = ['num_classes', 'hidden_dim', 'two_stage']
+    __shared__ = ['num_classes', 'hidden_dim']
     __inject__ = ['loss']
 
     def __init__(self,
@@ -415,19 +415,17 @@ class OVDeformableDETRHead(nn.Layer):
                  num_mlp_layers=3,
                  num_decoder_layer=6,
                  aux_loss=True,
-                 with_box_refine=True,
-                 two_stage=True,
+                 with_box_refine=False,
+                 two_stage=False,
                  cls_out_channels=1,
                  loss='OVDETRLoss'):
         super(OVDeformableDETRHead, self).__init__()
         self.num_classes = num_classes
         self.hidden_dim = hidden_dim
         self.nhead = nhead
-        self.two_stage = two_stage
         self.loss = loss
         self.cls_out_channels = cls_out_channels
-
-        self.select_id = select_id
+        self.num_decoder_layer = num_decoder_layer
 
         self.score_head = nn.Linear(hidden_dim, cls_out_channels)
         self.bbox_head = MLP(hidden_dim,
@@ -440,6 +438,7 @@ class OVDeformableDETRHead(nn.Layer):
 
         self.aux_loss = aux_loss
         self.with_box_refine = with_box_refine
+        self.two_stage = two_stage
 
         self._reset_parameters()
 

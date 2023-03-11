@@ -15,7 +15,7 @@ __all__ = ['ChannelMapper']
 class ChannelMapper(nn.Layer):
     def __init__(self,
                  backbone_num_channels=[512, 1024, 2048],
-                 hidden_dim=512,
+                 hidden_dim=256,
                  num_feature_levels=4,
                  weight_attr=None,
                  bias_attr=None,
