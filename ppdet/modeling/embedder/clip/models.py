@@ -25,7 +25,7 @@ import paddle
 import paddle.nn as nn
 import paddle.nn.functional as F
 from paddle import ParamAttr
-from paddle.nn.initializer import Normal, Constant
+from paddle.nn.initializer import Normal, Constant, Assign
 
 from ppdet.modeling.initializer import zeros_, normal_
 from ppdet.core.workspace import register
@@ -133,8 +133,15 @@ class ViT(nn.Layer):
         self.transformer = Transformer(width, layers, heads,
                                        stochastic_droplayer_rate)
         self.ln_post = LayerNorm(width)
-        if output_dim is not None:
-            self.proj = nn.Linear(width, self.output_dim, bias_attr=False)
+        # if output_dim is not None:
+        #     self.proj = nn.Linear(width, self.output_dim, bias_attr=False)
+        proj = self.create_parameter(
+            shape=(width,),
+            default_initializer=Assign(
+                scale * paddle.randn(((width, output_dim)))
+            )
+        )
+        self.add_parameter("proj", proj)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -146,10 +153,13 @@ class ViT(nn.Layer):
         x = x + self.positional_embedding.cast(x.dtype)
         x = self.ln_pre(x)
         x = feature = self.transformer(x)
-        if self.output_dim is not None:
-            x = self.ln_post(x[:, 0, :])
-            x = self.proj(x)
-        else:
-            x = self.ln_post(x)
+        x =self.ln_post(x[:, 0, :])
+        # if self.output_dim is not None:
+        #     x = self.ln_post(x[:, 0, :])
+        #     x = self.proj(x)
+        # else:
+        #     x = self.ln_post(x)
+        if self.proj is not None:
+            x = x @ self.proj
 
         return x, feature

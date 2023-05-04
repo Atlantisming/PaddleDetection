@@ -7,9 +7,10 @@ use_focal_loss: True
 OVDETR:
   backbone: ResNet
   neck: ChannelMapper
-  encoder: OVDeformableTransformerEncoder
-  decoder: OVDeformableTransformerDecoder
-  position_embedding: PositionEmbedding
+#  encoder: OVDeformableTransformerEncoder
+#  decoder: OVDeformableTransformerDecoder
+#  position_embedding: PositionEmbedding
+  transformer: OVDeformableTransformer
   detr_head: OVDeformableDETRHead
   two_stage: True
   with_box_refine: True
@@ -28,40 +29,48 @@ ResNet:
 ChannelMapper:
   backbone_num_channels: [512, 1024, 2048]
 
-OVDeformableTransformerEncoder:
-  hidden_dim: 256
+OVDeformableTransformer:
   nhead: 8
-  dim_feedforward: 1024
-  dropout: 0.1
-  activation: relu
-  num_feature_levels: 4
-  num_encoder_points: 4
-  num_layers: 6
+  dropout: 0
+  prob: 1
 
-OVDeformableTransformerDecoder:
-  nhead: 8
-  dim_feedforward: 1024
-  dropout: 0.1
-  activation: relu
-  num_feature_levels: 4
-  num_decoder_points: 4
-  num_layers: 6
-  cls_out_channels: 2
-  num_mlp_layers: 3
-  return_intermediate: True
-  with_box_refine: True
-
-PositionEmbedding:
-  offset: -0.5
+#OVDeformableTransformerEncoder:
+#  hidden_dim: 256
+#  nhead: 8
+#  dim_feedforward: 1024
+#  dropout: 0
+#  activation: relu
+#  num_feature_levels: 4
+#  num_encoder_points: 4
+#  num_layers: 6
+#
+#OVDeformableTransformerDecoder:
+#  nhead: 8
+#  dim_feedforward: 1024
+#  dropout: 0
+#  activation: relu
+#  num_feature_levels: 4
+#  num_decoder_points: 4
+#  num_layers: 6
+#  cls_out_channels: 1
+#  num_mlp_layers: 3
+#  return_intermediate: True
+#  with_box_refine: True
+#
+#PositionEmbedding:
+#  offset: -0.5
 
 OVDeformableDETRHead:
   num_mlp_layers: 3
 
 
 OVDETRLoss:
-  loss_coeff: {class: 2, bbox: 5, giou: 2, mask: 1, dice: 1}
+  loss_coeff: {class: 3, bbox: 5, giou: 2, embed: 2}
   aux_loss: True
 
 
 HungarianMatcher:
-  matcher_coeff: {class: 2, bbox: 5, giou: 2}
+  matcher_coeff: {class: 3, bbox: 5, giou: 2}
+
+OVHungarianMatcher:
+  matcher_coeff: {class: 3, bbox: 5, giou: 2}

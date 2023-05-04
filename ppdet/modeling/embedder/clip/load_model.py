@@ -18,6 +18,7 @@ from paddle.vision.transforms import Compose, Resize, CenterCrop, ToTensor, Norm
 
 from .clip_models import CLIP
 from .tokenizer import tokenize
+from ppdet.utils.checkpoint import match_state_dict
 
 
 def get_transforms(image_resolution):
@@ -115,6 +116,7 @@ def load_model(model_name, pretrained=False):
                 os.mkdir('pretrained_models')
             wget.download(url, out=model_path)
         params = paddle.load(model_path)
+        res = match_state_dict(model.state_dict(), params)
         model.set_state_dict(params)
     model.eval()
     return model, transforms

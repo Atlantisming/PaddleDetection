@@ -215,7 +215,8 @@ class TextEncoder(nn.Layer):
         seq_idx = text.argmax(axis=-1)
         gather_idx = paddle.stack([batch_idx, seq_idx], axis=1)
         x = paddle.gather_nd(x, gather_idx)
-        x = self.text_projection(x)
+        # x = self.text_projection(x)
+        x = x @ self.text_projection
         # x = x[paddle.arange(x.shape[0]).numpy(), text.argmax(axis=-1).numpy()] @ self.text_projection.numpy()
         # x = paddle.to_tensor(x)
 
@@ -259,8 +260,3 @@ def build_text_embedding_coco():
 
     return paddle.to_tensor(zeroshot_weights[all_ids])
 
-
-# 单元测试
-if __name__ == '__main__':
-    res = build_text_embedding_coco()
-    print(res)

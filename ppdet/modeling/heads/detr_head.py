@@ -24,6 +24,9 @@ import pycocotools.mask as mask_util
 from ..initializer import linear_init_, constant_, xavier_uniform_
 from ..transformers.utils import inverse_sigmoid
 
+import math
+import copy
+
 __all__ = ['DETRHead', 'DeformableDETRHead', 'DINOHead', 'OVDeformableDETRHead']
 
 
@@ -415,8 +418,8 @@ class OVDeformableDETRHead(nn.Layer):
                  num_mlp_layers=3,
                  num_decoder_layer=6,
                  aux_loss=True,
-                 with_box_refine=False,
-                 two_stage=False,
+                 with_box_refine=True,
+                 two_stage=True,
                  cls_out_channels=1,
                  loss='OVDETRLoss'):
         super(OVDeformableDETRHead, self).__init__()
@@ -482,7 +485,10 @@ class OVDeformableDETRHead(nn.Layer):
     def from_config(cls, cfg, hidden_dim, nhead, input_shape, two_stage):
         return {'hidden_dim': hidden_dim, 'nhead': nhead, 'two_stage': two_stage}
 
-    def forward(self, out_transformer, clip_id, memory_feature, body_feats, inputs=None):
+    def forward(self,
+                head_inputs_dict,
+                body_feats,
+                inputs=None):
         r"""
         Args:
             out_transformer (Tuple): (feats: [num_levels, batch_size,
@@ -494,19 +500,22 @@ class OVDeformableDETRHead(nn.Layer):
             body_feats (List(Tensor)): list[[B, C, H, W]]
             inputs (dict): dict(inputs)
         """
-        feats, init_reference_points, inter_reference_points, encoder_output_class, enc_outputs_coord_unact = out_transformer
-        select_id, clip_query_ori = clip_id
-        memory = memory_feature
+        # feats, init_reference_points, inter_reference_points, encoder_output_class, enc_outputs_coord_unact = out_transformer
+        # select_id, clip_query_ori = clip_id
+        feats = head_inputs_dict['feats']
+        reference_list = head_inputs_dict['reference']
+        enc_outputs_class = head_inputs_dict['enc_outputs_class']
+        enc_outputs_coord_unact = head_inputs_dict['enc_outputs_coord_unact']
+        select_id = head_inputs_dict['select_id']
+        clip_query_ori = head_inputs_dict['clip_query_ori']
+        # memory = memory_feature
 
         outputs_classes = []
         outputs_coords = []
         outputs_embeds = []
+
         for lvl in range(feats.shape[0]):
-            if lvl == 0:
-                reference = init_reference_points
-            else:
-                reference = inter_reference_points[lvl - 1]
-            reference = inverse_sigmoid(reference)
+            reference = inverse_sigmoid(reference_list[lvl])
             outputs_class = self.score_head[lvl](feats[lvl])
             tmp = self.bbox_head[lvl](feats[lvl])
             if reference.shape[-1] == 4:
@@ -529,22 +538,27 @@ class OVDeformableDETRHead(nn.Layer):
         outputs_bbox = paddle.stack(outputs_coords)
         outputs_embed = paddle.stack(outputs_embeds)
 
+        print('outputs_bbox', outputs_bbox[-1])
+        print('outputs_class', outputs_class[-1])
+
         # It's equivalent to "outputs_bbox[:, :, :, :2] += reference_points",
         # but the gradient is wrong in paddle.
 
         out = {
             "pred_logits": outputs_class[-1],
-            "pred_boxes": outputs_coord[-1],
+            "pred_boxes": outputs_bbox[-1],
             "pred_embed": outputs_embed[-1],
             "select_id": select_id,
             "clip_query": clip_query_ori,
         }
         if self.aux_loss:
-            out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_coord)
-            for temp, embed in zip(out["aux_outputs"], outputs_embed[:-1]):
-                temp["select_id"] = select_id
-                temp["pred_embed"] = embed
-                temp["clip_query"] = clip_query_ori
+            out["aux_outputs"] = {
+                "pred_logits": outputs_class[:-1],
+                "pred_boxes": outputs_bbox[:-1],
+                "pred_embed": outputs_embed[:-1],
+                "select_id": select_id,
+                "clip_query": clip_query_ori,
+            }
 
         if self.two_stage:
             enc_outputs_coord = F.sigmoid(enc_outputs_coord_unact)
@@ -556,7 +570,7 @@ class OVDeformableDETRHead(nn.Layer):
 
         if self.training:
             assert inputs is not None
-            assert 'labels' in inputs and 'boxes' in inputs
+            assert 'gt_class' in inputs and 'gt_bbox' in inputs
 
             return self.loss(out, inputs)
         else:

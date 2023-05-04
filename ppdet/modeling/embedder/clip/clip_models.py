@@ -96,15 +96,15 @@ class CLIP(nn.Layer):
 
         self.ln_final = nn.LayerNorm(transformer_width)
 
-        # text_projection = self.create_parameter(
-        #     shape=(transformer_width, embed_dim),
-        #     default_initializer=Assign(
-        #         paddle.empty((transformer_width, embed_dim))
-        #     )
-        # )
-        # self.add_parameter("text_projection", text_projection)
-        self.text_projection = nn.Linear(
-            transformer_width, embed_dim, bias_attr=False)
+        text_projection = self.create_parameter(
+            shape=(transformer_width, embed_dim),
+            default_initializer=Assign(
+                paddle.empty((transformer_width, embed_dim))
+            )
+        )
+        self.add_parameter("text_projection", text_projection)
+        # self.text_projection = nn.Linear(
+        #     transformer_width, embed_dim, bias_attr=False)
 
         logit_scale = self.create_parameter(
             shape=(1,),
@@ -147,9 +147,10 @@ class CLIP(nn.Layer):
             normal_(resblock.mlp.c_proj.weight, std=proj_std)
 
         if self.text_projection is not None:
-            normal_(
-                self.text_projection.weight,
-                std=self.transformer.width ** -0.5)
+            # normal_(
+            #     self.text_projection.weight,
+            #     std=self.transformer.width ** -0.5)
+            Normal(std=self.transformer.width ** -0.5)(self.text_projection)
 
     def build_attention_mask(self):
         mask = paddle.full(

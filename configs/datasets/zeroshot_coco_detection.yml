@@ -13,6 +13,7 @@ EvalDataset:
     image_dir: val2017
     anno_path: zero-shot/instances_val2017_all_2.json
     dataset_dir: dataset/coco
+    data_fields: ['image', 'gt_bbox', 'gt_class', 'is_crowd']
     allow_empty: true
 
 TestDataset:
