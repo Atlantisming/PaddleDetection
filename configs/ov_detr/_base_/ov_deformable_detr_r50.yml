@@ -14,7 +14,7 @@ OVDETR:
   detr_head: OVDeformableDETRHead
   two_stage: True
   with_box_refine: True
-  post_process: DETRBBoxPostProcess
+  post_process: OVDETRBBoxPostProcess
 
 
 ResNet:

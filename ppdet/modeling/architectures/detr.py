@@ -280,6 +280,7 @@ class OVDETR(DETR):
         return loss
 
     def forward_test(self):
+        print(self.inputs)
         # Backbone
         body_feats = self.backbone(self.inputs)
 
@@ -294,6 +295,9 @@ class OVDETR(DETR):
         num_patch = 4
         dtype = self.patch2query.weight.dtype
         preds_list = []
+        bboxes_list = []
+        logits_list = []
+
         for c in range(len(select_id) // num_patch + 1):
             clip_query = self.zeroshot_w[:, c * num_patch: (c + 1) * num_patch].t()
             clip_query_ori = clip_query
@@ -308,14 +312,20 @@ class OVDETR(DETR):
 
             # DETR Head
             preds = self.detr_head(head_inputs_dict, body_feats)
-            preds_list.append(preds)
-        preds = paddle.concat(preds_list, -2)
-        if self.exclude_post_process:
             bboxes, logits, masks = preds
+
+            bboxes_list.append(bboxes)
+            logits_list.append(logits)
+            preds_list.append(preds)
+        bboxes = paddle.concat(bboxes_list, -2).unsqueeze(0)
+        logits = paddle.concat(logits_list, -2)
+        # preds = paddle.concat(preds_list, -2)
+        if self.exclude_post_process:
+            # bboxes, logits, masks = preds
             return bboxes, logits
         else:
             bbox, bbox_num = self.post_process(
-                preds, self.inputs['im_shape'], self.inputs['scale_factor'])
+                bboxes, logits, select_id, self.inputs['im_shape'], self.inputs['scale_factor'])
             return bbox, bbox_num
 
 

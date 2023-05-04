@@ -632,6 +632,7 @@ class Trainer(object):
                     outs = self.model(data)
             else:
                 outs = self.model(data)
+            print('outs', outs)
 
             # update metrics
             for metric in self._metrics:

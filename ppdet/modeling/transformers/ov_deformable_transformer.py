@@ -707,7 +707,7 @@ class OVDeformableTransformer(nn.Layer):
             mask = mask.flatten(1)
             mask_flatten.append(mask)
         src_flatten = paddle.concat(src_flatten, 1)
-        # print('src_flatten', src_flatten)
+        print('src_flatten', src_flatten)
         # TODO 待考究
         # mask_flatten = None if src_mask is None else paddle.concat(mask_flatten,
         #                                                            1)

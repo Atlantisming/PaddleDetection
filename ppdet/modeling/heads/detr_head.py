@@ -538,9 +538,6 @@ class OVDeformableDETRHead(nn.Layer):
         outputs_bbox = paddle.stack(outputs_coords)
         outputs_embed = paddle.stack(outputs_embeds)
 
-        print('outputs_bbox', outputs_bbox[-1])
-        print('outputs_class', outputs_class[-1])
-
         # It's equivalent to "outputs_bbox[:, :, :, :2] += reference_points",
         # but the gradient is wrong in paddle.
 
