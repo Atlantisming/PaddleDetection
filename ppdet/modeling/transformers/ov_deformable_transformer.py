@@ -41,28 +41,6 @@ __all__ = ['OVDeformableTransformer',
            # 'OVDeformableTransformerDecoder',
            ]
 
-class MLP(nn.Layer):
-    """This code is based on
-        https://github.com/facebookresearch/detr/blob/main/models/detr.py
-    """
-
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
-        super().__init__()
-        self.num_layers = num_layers
-        h = [hidden_dim] * (num_layers - 1)
-        self.layers = nn.LayerList(
-            nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
-
-        self._reset_parameters()
-
-    def _reset_parameters(self):
-        for l in self.layers:
-            linear_init_(l)
-
-    def forward(self, x):
-        for i, layer in enumerate(self.layers):
-            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
-        return x
 
 # 对齐
 class MSDeformableAttention(nn.Layer):
@@ -544,69 +522,22 @@ class OVDeformableTransformer(nn.Layer):
                 bias_attr=ParamAttr(learning_rate=lr_mult))
             normal_(self.query_embed.weight)
 
-        # self.input_proj = nn.LayerList()
-        # for in_channels in backbone_num_channels:
-        #     self.input_proj.append(
-        #         nn.Sequential(
-        #             nn.Conv2D(
-        #                 in_channels,
-        #                 hidden_dim,
-        #                 kernel_size=1,
-        #                 weight_attr=weight_attr,
-        #                 bias_attr=bias_attr),
-        #             nn.GroupNorm(32, hidden_dim)))
-        # in_channels = backbone_num_channels[-1]
-        # for _ in range(num_feature_levels - len(backbone_num_channels)):
-        #     self.input_proj.append(
-        #         nn.Sequential(
-        #             nn.Conv2D(
-        #                 in_channels,
-        #                 hidden_dim,
-        #                 kernel_size=3,
-        #                 stride=2,
-        #                 padding=1,
-        #                 weight_attr=weight_attr,
-        #                 bias_attr=bias_attr),
-        #             nn.GroupNorm(32, hidden_dim)))
-        #     in_channels = hidden_dim
-
         self.position_embedding = PositionEmbedding(
             hidden_dim // 2,
             normalize=True if position_embed_type == 'sine' else False,
             embed_type=position_embed_type,
             offset=-0.5)
 
-        # self.zeroshot_w = zeroshot_w.t()
-
-        # self.patch2query = nn.Linear(512, 256)
-        # self.patch2query_img = nn.Linear(512, 256)
-        # # mark 源码此处for layer in [self.patch2query]:
-        # xavier_uniform_(self.patch2query.weight)
-        # constant_(self.patch2query.bias, 0)
-
-        # # self.head = head
-        # num_pred = self.decoder.num_layers
-        #
-        # self.all_ids = paddle.to_tensor(list(range(self.zeroshot_w.shape[-1])))
-        # self.max_len = max_len
-        # self.max_pad_len = max_len - 3
-        #
-        # with open(clip_feat_path, 'rb') as f:
-        #     self.clip_feat = pickle.load(f)
-        # self.prob = prob
-        #
-        # self._reset_parameters()
+        self._reset_parameters()
 
     def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
         normal_(self.level_embed.weight)
-        # normal_(self.tgt_embed.weight)
-        # normal_(self.query_pos_embed.weight)
         if not self.two_stage:
             xavier_uniform_(self.reference_points.weight)
             constant_(self.reference_points.bias)
-        for l in self.input_proj:
-            xavier_uniform_(l[0].weight)
-            constant_(l[0].bias)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -675,17 +606,8 @@ class OVDeformableTransformer(nn.Layer):
                 inputs=None,
                 query_embed=None,
                 text_query=None,
+                cache=None,
                 *args, **kwargs):
-        # srcs = []
-        # for i in range(len(src_feats)):
-        #     srcs.append(self.input_proj[i](src_feats[i]))
-        # if self.num_feature_levels > len(srcs):
-        #     len_srcs = len(srcs)
-        #     for i in range(len_srcs, self.num_feature_levels):
-        #         if i == len_srcs:
-        #             srcs.append(self.input_proj[i](src_feats[-1]))
-        #         else:
-        #             srcs.append(self.input_proj[i](srcs[-1]))
         src_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
@@ -707,7 +629,7 @@ class OVDeformableTransformer(nn.Layer):
             mask = mask.flatten(1)
             mask_flatten.append(mask)
         src_flatten = paddle.concat(src_flatten, 1)
-        print('src_flatten', src_flatten)
+
         # TODO 待考究
         # mask_flatten = None if src_mask is None else paddle.concat(mask_flatten,
         #                                                            1)
@@ -725,8 +647,14 @@ class OVDeformableTransformer(nn.Layer):
         valid_ratios = paddle.stack(valid_ratios, 1)
 
         # encoder
-        memory = self.encoder(src_flatten, spatial_shapes, level_start_index,
-                              mask_flatten, lvl_pos_embed_flatten, valid_ratios)
+        if cache is None:
+            memory = self.encoder(src_flatten, spatial_shapes, level_start_index,
+                                  mask_flatten, lvl_pos_embed_flatten, valid_ratios)
+            if not self.training:                                       # training 为 nn.modules 中定义
+                cache = memory
+        else:
+            memory = cache
+
         # print('memory', memory)
 
         # prepare input for decoder

@@ -120,7 +120,7 @@ class OVDETR(DETR):
                  neck,
                  transformer,
                  detr_head,
-                 max_len=9,
+                 max_len=15,
                  with_box_refine=True,
                  two_stage=True,
                  zeroshot_w=build_text_embedding_coco(),
@@ -150,7 +150,7 @@ class OVDETR(DETR):
 
         with open(clip_feat_path, 'rb') as f:
             self.clip_feat = pickle.load(f)
-        self.prob = 1
+        self.prob = 0.5
         self.two_stage = two_stage
         if with_box_refine:
             # constant_(self.bbox_head[0].layers[be_last].bias[2:], -2.0)
@@ -219,13 +219,11 @@ class OVDETR(DETR):
             return self.forward_test()
 
     def forward_train(self):
-        print(self.inputs)
         # Backbone
         body_feats = self.backbone(self.inputs)
 
         # Neck
         body_feats = self.neck(body_feats)
-        print(body_feats)
 
         pad_mask = self.inputs['pad_mask'] if self.training else None
         # out_transformer, clip_id, memory_feature = self.transformer(body_feats, pad_mask, self.inputs)
@@ -274,13 +272,12 @@ class OVDETR(DETR):
 
         # DETR Head
         loss = self.detr_head(head_inputs_dict, body_feats, self.inputs)
-        print(loss)
-        print(sum(loss[k] for k in loss.keys()))
-        exit()
+        # print('loss', loss)
+        # print('sum', sum(loss[k] for k in loss.keys()))
+
         return loss
 
     def forward_test(self):
-        print(self.inputs)
         # Backbone
         body_feats = self.backbone(self.inputs)
 
@@ -292,7 +289,7 @@ class OVDETR(DETR):
 
         # clip_query
         select_id = list(range(self.zeroshot_w.shape[-1]))
-        num_patch = 4
+        num_patch = 15
         dtype = self.patch2query.weight.dtype
         preds_list = []
         bboxes_list = []
@@ -319,6 +316,9 @@ class OVDETR(DETR):
             preds_list.append(preds)
         bboxes = paddle.concat(bboxes_list, -2).unsqueeze(0)
         logits = paddle.concat(logits_list, -2)
+        # print('outputs_class', bboxes)
+        # print('outputs_bbox', logits)
+
         # preds = paddle.concat(preds_list, -2)
         if self.exclude_post_process:
             # bboxes, logits, masks = preds
@@ -326,6 +326,8 @@ class OVDETR(DETR):
         else:
             bbox, bbox_num = self.post_process(
                 bboxes, logits, select_id, self.inputs['im_shape'], self.inputs['scale_factor'])
+            # print(bbox)
+            # exit()
             return bbox, bbox_num
 
 

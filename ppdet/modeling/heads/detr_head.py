@@ -21,7 +21,7 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 from ppdet.core.workspace import register
 import pycocotools.mask as mask_util
-from ..initializer import linear_init_, constant_, xavier_uniform_
+from ..initializer import linear_init_, constant_, xavier_uniform_, bias_init_with_prob
 from ..transformers.utils import inverse_sigmoid
 
 import math
@@ -436,8 +436,7 @@ class OVDeformableDETRHead(nn.Layer):
                              output_dim=4,
                              num_layers=num_mlp_layers)
         self.feature_align = nn.Linear(256, 512)
-        xavier_uniform_(self.feature_align.weight)
-        constant_(self.feature_align.bias, 0)
+
 
         self.aux_loss = aux_loss
         self.with_box_refine = with_box_refine
@@ -445,41 +444,34 @@ class OVDeformableDETRHead(nn.Layer):
 
         self._reset_parameters()
 
-        prior_prob = 0.01
-        bias_value = -math.log((1 - prior_prob) / prior_prob)
-        self.score_head.bias.data = paddle.ones([self.cls_out_channels]) * bias_value
-
-        be_last = len(self.bbox_head.layers) - 1
-        constant_(self.bbox_head.layers[be_last].weight, 0)
-        constant_(self.bbox_head.layers[be_last].bias, 0)
-
         self.num_pred = (num_decoder_layer + 1) if two_stage else num_decoder_layer
         if with_box_refine:
             self.score_head = _get_clones(self.score_head, self.num_pred)
             self.bbox_head = _get_clones(self.bbox_head, self.num_pred)
             self.feature_align = _get_clones(self.feature_align, self.num_pred)
-            constant_(self.bbox_head[0].layers[be_last].bias[2:], -2.0)
+            constant_(self.bbox_head[0].layers[-1].bias[2:], -2.0)
             # hack implementation for iterative bounding box refinement
             # self.transformer.decoder.bbox_head = self.bbox_head
         else:
-            constant_(self.bbox_head.layers[be_last].bias[2:], -2.0)
+            constant_(self.bbox_head.layers[-1].bias[2:], -2.0)
             self.score_head = nn.LayerList([self.score_head for _ in range(self.num_pred)])
             self.bbox_head = nn.LayerList([self.bbox_head for _ in range(self.num_pred)])
             self.feature_align = nn.LayerList([self.feature_align for _ in range(self.num_pred)])
         if two_stage:
             # hack implementation for two-stage
             for box_embed in self.bbox_head:
-                constant_(box_embed.layers[be_last].bias[2:], 0.0)
+                constant_(box_embed.layers[-1].bias[2:], 0.0)
 
     def _reset_parameters(self):
         linear_init_(self.score_head)
-        constant_(self.score_head.bias, -4.595)
-        constant_(self.bbox_head.layers[-1].weight)
+        self.score_head.bias.data = paddle.ones([self.cls_out_channels]) * bias_init_with_prob()
 
-        with paddle.no_grad():
-            bias = paddle.zeros_like(self.bbox_head.layers[-1].bias)
-            bias[2:] = -2.0
-            self.bbox_head.layers[-1].bias.set_value(bias)
+        constant_(self.bbox_head.layers[-1].weight)
+        constant_(self.bbox_head.layers[-1].bias)
+
+        xavier_uniform_(self.feature_align.weight)
+        constant_(self.feature_align.bias)
+
 
     @classmethod
     def from_config(cls, cfg, hidden_dim, nhead, input_shape, two_stage):

@@ -26,7 +26,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .map_utils import prune_zero_padding, DetectionMAP
-from .coco_utils import get_infer_results, cocoapi_eval
+from .coco_utils import get_infer_results, cocoapi_eval, zeroshot_cocoapi_eval
 from .widerface_utils import face_eval_run
 from ppdet.data.source.category import get_categories
 from ppdet.modeling.rbox_utils import poly2rbox_np
@@ -571,7 +571,7 @@ class Zeroshot_COCOMetric(Metric):
                 logger.info('The bbox result is saved to {} and do not '
                             'evaluate the mAP.'.format(output))
             else:
-                bbox_stats = cocoapi_eval(
+                bbox_stats = zeroshot_cocoapi_eval(
                     output,
                     'bbox',
                     anno_file=self.anno_file,

@@ -233,28 +233,28 @@ def zeroshot_cocoapi_eval(jsonfile,
         coco_eval = COCOeval(coco_gt, coco_dt, style)
     coco_eval.evaluate()
     coco_eval.accumulate()
-    for iou_type, coco_eval in self.coco_eval.items():
-        print("IoU metric: {}".format(iou_type))
-        coco_eval.summarize()
 
-        precisions = self.coco_eval[iou_type].eval["precision"]
+    coco_eval.summarize()
 
-        results_seen = []
-        results_unseen = []
-        for idx in range(precisions.shape[-3]):
-            # area range index 0: all area ranges
-            # max dets index -1: typically 100 per image
-            precision = precisions[0, :, idx, 0, -1]
-            precision = precision[precision > -1]
-            if precision.size:
-                ap = np.mean(precision)
-                # print(f"AP {idx}: {ap}")
-                if idx not in unseen_list:
-                    results_seen.append(float(ap * 100))
-                else:
-                    results_unseen.append(float(ap * 100))
-        print(f"{iou_type} AP seen: {np.mean(results_seen)}")
-        print(f"{iou_type} AP unseen: {np.mean(results_unseen)}")
+    precisions = coco_eval.eval["precision"]
+
+    results_seen = []
+    results_unseen = []
+    for idx in range(precisions.shape[-3]):
+        # area range index 0: all area ranges
+        # max dets index -1: typically 100 per image
+        precision = precisions[0, :, idx, 0, -1]
+        precision = precision[precision > -1]
+        if precision.size:
+            ap = np.mean(precision)
+            # print(f"AP {idx}: {ap}")
+            if idx not in unseen_list:
+                results_seen.append(float(ap * 100))
+            else:
+                results_unseen.append(float(ap * 100))
+    print(f"bbox AP seen: {np.mean(results_seen)}")
+    print(f"bbox AP unseen: {np.mean(results_unseen)}")
+
     if classwise:
         # Compute per-category AP and PR curve
         try:
