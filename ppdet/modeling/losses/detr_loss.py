@@ -107,8 +107,8 @@ class DETRLoss(nn.Layer):
             return {name_bbox: paddle.zeros([1]), name_giou: paddle.zeros([1])}
         loss = dict()
         if sum(len(a) for a in gt_bbox) == 0:
-            loss[name_bbox] = paddle.zeros([1]))
-            loss[name_giou] = paddle.zeros([1]))
+            loss[name_bbox] = paddle.zeros([1])
+            loss[name_giou] = paddle.zeros([1])
             return loss
 
         src_bbox, target_bbox = self._get_src_target_assign(boxes, gt_bbox,
@@ -910,17 +910,18 @@ class OVDETRLoss(DETRLoss):
         gt_bbox = inputs['gt_bbox']
         gt_class = inputs['gt_class']
 
-        total_loss = dict("loss_class": paddle.zeros(([1])))
+        total_loss = dict()
         if sum(len(a) for a in gt_class) == 0:
-            return total_loss
-        masks = []
-        for c in gt_class:
-            mask = c == -2
-            for ind, v in enumerate(c):
-                if v in select_id:
-                    mask[ind] = True
-            masks.append(mask)
-        num_gts = sum(len(paddle.masked_select(c, m)) for c, m in zip(gt_class, masks))
+            num_gts = 0
+        else:
+            masks = []
+            for c in gt_class:
+                mask = c == -2
+                for ind, v in enumerate(c):
+                    if v in select_id:
+                        mask[ind] = True
+                masks.append(mask)
+            num_gts = sum(len(paddle.masked_select(c, m)) for c, m in zip(gt_class, masks))
 
         if "match_indices" in kwargs:
             match_indices = kwargs["match_indices"]
