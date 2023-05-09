@@ -7,11 +7,10 @@ use_focal_loss: True
 OVDETR:
   backbone: ResNet
   neck: ChannelMapper
-#  encoder: OVDeformableTransformerEncoder
-#  decoder: OVDeformableTransformerDecoder
-#  position_embedding: PositionEmbedding
   transformer: OVDeformableTransformer
   detr_head: OVDeformableDETRHead
+  max_len: 9
+  prob: 1
   two_stage: True
   with_box_refine: True
   post_process: OVDETRBBoxPostProcess
@@ -31,8 +30,7 @@ ChannelMapper:
 
 OVDeformableTransformer:
   nhead: 8
-  dropout: 0
-  prob: 1
+  dropout: 0.1
 
 #OVDeformableTransformerEncoder:
 #  hidden_dim: 256
@@ -62,6 +60,7 @@ OVDeformableTransformer:
 
 OVDeformableDETRHead:
   num_mlp_layers: 3
+  cls_out_channels: 1
 
 
 OVDETRLoss:

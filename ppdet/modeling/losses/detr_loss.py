@@ -672,10 +672,6 @@ class OVDETRLoss(DETRLoss):
         self.ov_matcher = ov_matcher
         self.two_stage = two_stage
 
-        if not self.use_focal_loss:
-            self.loss_coeff['class'] = paddle.full([num_classes + 1],
-                                                   loss_coeff['class'])
-            self.loss_coeff['class'][-1] = loss_coeff['no_object']
         self.giou_loss = GIoULoss()
 
     def _get_loss_class(self,
@@ -691,26 +687,26 @@ class OVDETRLoss(DETRLoss):
         if logits is None:
             return {name_class: paddle.zeros([1])}
 
-        idx = self._get_src_permutation_idx(match_indices)
-        target_class_o_list = []
-        for t, (_, J) in zip(gt_class, match_indices):
-            if len(t[J].shape) == 1:
-                target_class_o_list.append(t[J])
-            else:
-                target_class_o_list.append(t[J].squeeze(1))
-        target_classes_o = paddle.concat(target_class_o_list)
-        # target_classes_o = paddle.concat([t[J].squeeze(1) for t, (_, J) in zip(gt_class, match_indices)])
-
-        target_classes_o = paddle.zeros_like(target_classes_o, dtype='int64')
-        target_classes = paddle.full(logits.shape[:2], logits.shape[2], dtype='int64')
-
-        target_classes[idx] = target_classes_o
         target_classes_onehot = paddle.zeros(
             [logits.shape[0], logits.shape[1], logits.shape[2] + 1],
             dtype=logits.dtype,
         )
-        target_classes_onehot = paddle.put_along_axis(target_classes_onehot, target_classes.unsqueeze(-1), values=1.,
-                                                      axis=2)
+        if sum(len(a) for a in gt_class) > 0:
+            idx = self._get_src_permutation_idx(match_indices)
+            target_class_o_list = []
+            for t, (_, J) in zip(gt_class, match_indices):
+                if len(t[J].shape) == 1:
+                    target_class_o_list.append(t[J])
+                else:
+                    target_class_o_list.append(t[J].squeeze(1))
+            target_classes_o = paddle.concat(target_class_o_list)
+
+            target_classes_o = paddle.zeros_like(target_classes_o, dtype='int64')
+            target_classes = paddle.full(logits.shape[:2], logits.shape[2], dtype='int64')
+
+            target_classes[idx] = target_classes_o
+            target_classes_onehot = paddle.put_along_axis(target_classes_onehot, target_classes.unsqueeze(-1), values=1.,
+                                                          axis=2)
         target_classes_onehot = target_classes_onehot[:, :, :-1]
 
         if self.use_focal_loss:
@@ -720,28 +716,6 @@ class OVDETRLoss(DETRLoss):
             loss_ce = F.cross_entropy(logits, target_classes_onehot)
 
         return {name_class: self.loss_coeff['class'] * loss_ce}
-
-        # target_label = paddle.full(logits.shape[:2], bg_index, dtype='int64')
-        # bs, num_query_objects = target_label.shape
-        # if sum(len(a) for a in gt_class) > 0:
-        #     index, updates = self._get_index_updates(num_query_objects,
-        #                                              gt_class, match_indices)
-        #     # target_label = paddle.scatter(
-        #     #     target_label.reshape([-1, 1]), index, updates.astype('int64'))
-        #     target_label = paddle.scatter(
-        #         target_label.reshape([-1, 1]), index,
-        #         paddle.zeros_like(updates).astype('int64'))
-        #
-        #     target_label = target_label.reshape([bs, num_query_objects])
-        # if self.use_focal_loss:
-        #     target_label = F.one_hot(target_label,
-        #                              self.num_classes + 1)[..., :-1]
-        # return {
-        #     name_class: self.loss_coeff['class'] * sigmoid_focal_loss(
-        #         logits, target_label, num_gts / num_query_objects)
-        # }
-
-
 
 
     def _get_loss_embed(self, pred_embed, select_id,
@@ -800,6 +774,7 @@ class OVDETRLoss(DETRLoss):
         loss_bbox = []
         loss_giou = []
         loss_embed = []
+
         for aux_boxes, aux_logits, aux_embed in zip(boxes, logits, pred_embed):
             if match_indices is None:
                 match_indices = self.ov_matcher(aux_boxes, aux_logits, gt_bbox,
@@ -843,9 +818,17 @@ class OVDETRLoss(DETRLoss):
         loss_bbox = []
         loss_giou = []
 
-        bin_class = copy.deepcopy(gt_class)
-        for i in range(len(bin_class)):
-            bin_class[i] = paddle.zeros_like(bin_class[i])
+        if sum(len(a) for a in gt_class) > 0:
+            bin_class = copy.deepcopy(gt_class)
+            for i in range(len(bin_class)):
+                bin_class[i] = paddle.zeros_like(bin_class[i])
+        else:
+            loss = {
+                "loss_class_enc" + postfix: paddle.to_tensor([0.]),
+                "loss_bbox_enc" + postfix: paddle.to_tensor([0.]),
+                "loss_giou_enc" + postfix: paddle.to_tensor([0.])
+            }
+            return loss
 
         if dn_match_indices is None:
             match_indices = self.matcher(boxes, logits, gt_bbox,
@@ -927,6 +910,18 @@ class OVDETRLoss(DETRLoss):
         gt_bbox = inputs['gt_bbox']
         gt_class = inputs['gt_class']
 
+        print(gt_class)
+
+        masks = []
+        for c in gt_class:
+            mask = c == -2
+            for ind, v in enumerate(c):
+                if v in select_id:
+                    mask[ind] = True
+            masks.append(mask)
+
+        num_gts = sum(len(paddle.masked_select(c, m)) for c, m in zip(gt_class, masks))
+
         if "match_indices" in kwargs:
             match_indices = kwargs["match_indices"]
         else:
@@ -934,7 +929,6 @@ class OVDETRLoss(DETRLoss):
                                          logits.detach(), gt_bbox,
                                             gt_class, select_id)
 
-        num_gts = sum(len(a) for a in gt_bbox)
         num_gts = paddle.to_tensor([num_gts], dtype="float32")
         if paddle.distributed.get_world_size() > 1:
             paddle.distributed.all_reduce(num_gts)

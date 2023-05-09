@@ -367,37 +367,14 @@ class DeformableTransformerDecoderLayer(nn.Layer):
         return tgt
 
 
-# 对齐
-# @register
-# class OVDeformableTransformerDecoder(nn.Layer):
-#     def __init__(self,
-#                  nhead,
-#                  dim_feedforward,
-#                  dropout,
-#                  activation,
-#                  num_feature_levels,
-#                  num_decoder_points,
-#                  num_layers,
-#                  cls_out_channels=1,
-#                  hidden_dim=256,
-#                  num_mlp_layers=3,
-#                  return_intermediate=False,
-#                  with_box_refine=False,
-#                  weight_attr=None,
-#                  bias_attr=None):
-#         super(OVDeformableTransformerDecoder, self).__init__()
-#         decoder_layer = DeformableTransformerDecoderLayer(
-#             hidden_dim, nhead, dim_feedforward, dropout, activation,
-#             num_feature_levels, num_decoder_points, weight_attr, bias_attr)
 class OVDeformableTransformerDecoder(nn.Layer):
-    def __init__(self, decoder_layer, num_layers, cls_out_channels,
+    def __init__(self, decoder_layer, num_layers,
                  return_intermediate=False,
                  ):
         super(OVDeformableTransformerDecoder, self).__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.return_intermediate = return_intermediate
-        self.cls_out_channel = cls_out_channels
         # hack implementation for iterative bounding box refinement and two-stage Deformable DETR
         self.bbox_head = None
         self.score_head = None
@@ -455,8 +432,6 @@ class OVDeformableTransformer(nn.Layer):
 
     def __init__(self,
                  num_queries=300,
-                 position_embed_type='sine',
-                 return_intermediate_dec=True,
                  backbone_num_channels=[512, 1024, 2048],
                  num_feature_levels=4,
                  num_encoder_points=4,
@@ -469,15 +444,10 @@ class OVDeformableTransformer(nn.Layer):
                  dropout=0.1,
                  activation="relu",
                  lr_mult=0.1,
+                 position_embed_type='sine',
+                 return_intermediate_dec=True,
                  two_stage=True,
                  two_stage_num_proposals=300,
-                 with_box_refine=False,
-                 cls_out_channels=2,
-                 max_len=15,
-                 clip_feat_path='/home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/transformers/clip_feat_coco_pickle_label.pkl',
-                 prob=0.5,
-                 zeroshot_w=build_text_embedding_coco(),
-                 # head = 'OVDeformableDETRHead',
                  weight_attr=None,
                  bias_attr=None):
         super(OVDeformableTransformer, self).__init__()
@@ -501,7 +471,7 @@ class OVDeformableTransformer(nn.Layer):
             hidden_dim, nhead, dim_feedforward, dropout, activation,
             num_feature_levels, num_decoder_points, weight_attr, bias_attr)
         self.decoder = OVDeformableTransformerDecoder(
-            decoder_layer, num_decoder_layers, cls_out_channels,
+            decoder_layer, num_decoder_layers,
             return_intermediate=return_intermediate_dec)
 
         self.level_embed = nn.Embedding(num_feature_levels, hidden_dim)

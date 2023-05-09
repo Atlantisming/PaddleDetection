@@ -121,6 +121,7 @@ class OVDETR(DETR):
                  transformer,
                  detr_head,
                  max_len=15,
+                 prob=0.5,
                  with_box_refine=True,
                  two_stage=True,
                  zeroshot_w=build_text_embedding_coco(),
@@ -150,7 +151,7 @@ class OVDETR(DETR):
 
         with open(clip_feat_path, 'rb') as f:
             self.clip_feat = pickle.load(f)
-        self.prob = 0.5
+        self.prob = prob
         self.two_stage = two_stage
         if with_box_refine:
             # constant_(self.bbox_head[0].layers[be_last].bias[2:], -2.0)
@@ -230,10 +231,13 @@ class OVDETR(DETR):
 
         # clip_query
         # uniq_labels = paddle.concat([t["gt_class"] for t in inputs])
-        uniq_labels = paddle.concat(self.inputs["gt_class"])
-        uniq_labels = paddle.unique(uniq_labels)
-        # uniq_labels = uniq_labels[paddle.randperm(len(uniq_labels))][: self.max_len]
-        uniq_labels = uniq_labels[paddle.to_tensor(list(range(len(uniq_labels))))][: self.max_len]
+        if sum(len(a) for a in self.inputs["gt_class"]) > 0:
+            uniq_labels = paddle.concat(self.inputs["gt_class"])
+            uniq_labels = paddle.unique(uniq_labels)
+            uniq_labels = uniq_labels[paddle.to_tensor(list(range(len(uniq_labels))))][: self.max_len]
+            # uniq_labels = uniq_labels[paddle.randperm(len(uniq_labels))][: self.max_len]
+        else:
+            uniq_labels = paddle.to_tensor([])
         select_id = uniq_labels.tolist()
         # mark 添加补齐id
         if len(select_id) < self.max_pad_len:
