@@ -9,8 +9,8 @@ OVDETR:
   neck: ChannelMapper
   transformer: OVDeformableTransformer
   detr_head: OVDeformableDETRHead
-  max_len: 9
-  prob: 1
+  max_len: 15
+  prob: 0.5
   two_stage: True
   with_box_refine: True
   post_process: OVDETRBBoxPostProcess
