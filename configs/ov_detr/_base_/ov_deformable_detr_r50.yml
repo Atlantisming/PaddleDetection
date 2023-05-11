@@ -9,7 +9,7 @@ OVDETR:
   neck: ChannelMapper
   transformer: OVDeformableTransformer
   detr_head: OVDeformableDETRHead
-  max_len: 15
+  max_len: 9
   prob: 0.5
   two_stage: True
   with_box_refine: True
@@ -26,37 +26,11 @@ ResNet:
   num_stages: 4
 
 ChannelMapper:
-  backbone_num_channels: [512, 1024, 2048]
+  num_feature_levels: 4
 
 OVDeformableTransformer:
   nhead: 8
   dropout: 0.1
-
-#OVDeformableTransformerEncoder:
-#  hidden_dim: 256
-#  nhead: 8
-#  dim_feedforward: 1024
-#  dropout: 0
-#  activation: relu
-#  num_feature_levels: 4
-#  num_encoder_points: 4
-#  num_layers: 6
-#
-#OVDeformableTransformerDecoder:
-#  nhead: 8
-#  dim_feedforward: 1024
-#  dropout: 0
-#  activation: relu
-#  num_feature_levels: 4
-#  num_decoder_points: 4
-#  num_layers: 6
-#  cls_out_channels: 1
-#  num_mlp_layers: 3
-#  return_intermediate: True
-#  with_box_refine: True
-#
-#PositionEmbedding:
-#  offset: -0.5
 
 OVDeformableDETRHead:
   num_mlp_layers: 3

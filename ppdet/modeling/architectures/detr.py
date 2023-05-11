@@ -191,10 +191,10 @@ class OVDETR(DETR):
     def from_config(cls, cfg, *args, **kwargs):
         # backbone
         backbone = create(cfg['backbone'])
-        neck = create(cfg['neck'])
-        # transformer
         kwargs = {'input_shape': backbone.out_shape}
-        transformer = create(cfg['transformer'], **kwargs)
+        neck = create(cfg['neck'], **kwargs)
+        # transformer
+        transformer = create(cfg['transformer'])
         # transformer = create(cfg['transformer'])
 
         # head

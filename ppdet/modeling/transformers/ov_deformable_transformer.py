@@ -233,19 +233,6 @@ class DeformableTransformerEncoderLayer(nn.Layer):
         return src
 
 
-# 对齐
-# @register
-# class OVDeformableTransformerEncoder(nn.Layer):
-#     def __init__(self, hidden_dim, nhead, dim_feedforward, dropout, activation,
-#                 num_feature_levels, num_encoder_points, num_layers, weight_attr=None, bias_attr=None):
-#         super(OVDeformableTransformerEncoder, self).__init__()
-#         # encoder_layer = DeformableTransformerEncoderLayer(
-#         #     hidden_dim, nhead, dim_feedforward, dropout, activation,
-#         #     num_feature_levels, num_encoder_points, weight_attr, bias_attr)
-#         self.layers = _get_clones(encoder_layer, num_layers)
-#         self.num_layers = num_layers
-#         # self.hidden_dim = hidden_dim
-#         # self.nhead = nhead
 class OVDeformableTransformerEncoder(nn.Layer):
     def __init__(self, encoder_layer, num_layers):
         super(OVDeformableTransformerEncoder, self).__init__()
@@ -509,9 +496,9 @@ class OVDeformableTransformer(nn.Layer):
             xavier_uniform_(self.reference_points.weight)
             constant_(self.reference_points.bias)
 
-    @classmethod
-    def from_config(cls, cfg, input_shape):
-        return {'backbone_num_channels': [i.channels for i in input_shape], }
+    # @classmethod
+    # def from_config(cls, cfg):
+    #     return {}
 
     def get_proposal_pos_embed(self, proposals):
         # print(proposals.shape)
@@ -524,15 +511,10 @@ class OVDeformableTransformer(nn.Layer):
         #     dim_t = paddle.arange(num_pos_feats)
         dim_t = paddle.arange(num_pos_feats)
         dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats).astype('float32')
-        # mark diff < 1e-8
-        # print(dim_t)
         # N, L, 4
-        # proposals = proposals.sigmoid() * scale
         proposals = F.sigmoid(proposals) * scale
-        # print(proposals.shape)
         # N, L, 4, 128
         pos = proposals[:, :, :, None] / dim_t
-        # print(pos.shape)
         # N, L, 4, 64, 2
         pos = paddle.stack((pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()), axis=4).flatten(2)
         return pos
@@ -625,11 +607,8 @@ class OVDeformableTransformer(nn.Layer):
         else:
             memory = cache
 
-        # print('memory', memory)
-
         # prepare input for decoder
         bs, _, c = memory.shape
-        # done
         if self.two_stage:
             output_memory, output_proposals = self.gen_encoder_output_proposals(
                 memory, mask_flatten, spatial_shapes)

@@ -13,6 +13,7 @@ __all__ = ['ChannelMapper']
 
 @register
 class ChannelMapper(nn.Layer):
+    __shared__ = ['hidden_dim']
     def __init__(self,
                  backbone_num_channels=[512, 1024, 2048],
                  hidden_dim=256,
@@ -50,10 +51,13 @@ class ChannelMapper(nn.Layer):
             in_channels = hidden_dim
 
     def _reset_parameters(self):
-        normal_(self.level_embed.weight)
         for l in self.input_proj:
             xavier_uniform_(l[0].weight)
             constant_(l[0].bias)
+
+    @classmethod
+    def from_config(cls, cfg, input_shape):
+        return {'backbone_num_channels': [i.channels for i in input_shape], }
 
     def forward(self, src_feats):
         srcs = []
