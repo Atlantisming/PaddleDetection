@@ -464,7 +464,8 @@ class OVDeformableDETRHead(nn.Layer):
 
     def _reset_parameters(self):
         linear_init_(self.score_head)
-        self.score_head.bias.data = paddle.ones([self.cls_out_channels]) * bias_init_with_prob()
+        # self.score_head.bias = paddle.ones([self.cls_out_channels]) * bias_init_with_prob()
+        constant_(self.score_head.bias, bias_init_with_prob())
 
         constant_(self.bbox_head.layers[-1].weight)
         constant_(self.bbox_head.layers[-1].bias)
