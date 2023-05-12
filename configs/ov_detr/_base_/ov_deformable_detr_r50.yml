@@ -14,6 +14,8 @@ OVDETR:
   two_stage: True
   with_box_refine: True
   post_process: OVDETRBBoxPostProcess
+  bpe_path: /home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/embedder/clip/bpe_simple_vocab_16e6.txt.gz
+  clip_feat_path: /home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/transformers/clip_feat_coco_pickle_label.pkl
 
 
 ResNet:
@@ -31,8 +33,6 @@ ChannelMapper:
 OVDeformableTransformer:
   nhead: 8
   dropout: 0.1
-  bpe_path: /home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/embedder/clip/bpe_simple_vocab_16e6.txt.gz
-  clip_feat_path: /home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/transformers/clip_feat_coco_pickle_label.pkl
 
 
 OVDeformableDETRHead:

@@ -243,7 +243,7 @@ def build_text_embedding_coco(bpe_path):
                 "This is " + text if text.startswith("a") or text.startswith("the") else text
                 for text in texts
             ]
-            texts = tokenize(texts, bpe_path)  # tokenize
+            texts = tokenize(texts, bpe_path=bpe_path)  # tokenize
             if run_on_gpu:
                 texts = texts.cuda()
             text_embeddings = text_model(texts)
