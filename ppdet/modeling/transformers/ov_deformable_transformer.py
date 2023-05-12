@@ -506,11 +506,12 @@ class OVDeformableTransformer(nn.Layer):
         temperature = 10000
         scale = 2 * math.pi
         # mark diff 不需要梯度回传待查
-        # dim_t = paddle.arange(num_pos_feats, dtype='float32').requires_grad_(False)
+        dim_t = paddle.arange(num_pos_feats, dtype='float32').requires_grad_(False)
+        dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
         # with paddle.no_grad():
         #     dim_t = paddle.arange(num_pos_feats)
-        dim_t = paddle.arange(num_pos_feats)
-        dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats).astype('float32')
+        # dim_t = paddle.arange(num_pos_feats)
+        # dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats).astype('float32')
         # N, L, 4
         proposals = F.sigmoid(proposals) * scale
         # N, L, 4, 128

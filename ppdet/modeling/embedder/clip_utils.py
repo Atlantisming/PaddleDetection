@@ -222,7 +222,7 @@ class TextEncoder(nn.Layer):
 
         return x
 
-def build_text_embedding_coco():
+def build_text_embedding_coco(bpe_path):
     categories = COCO_CATEGORIES
     run_on_gpu = True
 
@@ -243,7 +243,7 @@ def build_text_embedding_coco():
                 "This is " + text if text.startswith("a") or text.startswith("the") else text
                 for text in texts
             ]
-            texts = tokenize(texts)  # tokenize
+            texts = tokenize(texts, bpe_path)  # tokenize
             if run_on_gpu:
                 texts = texts.cuda()
             text_embeddings = text_model(texts)

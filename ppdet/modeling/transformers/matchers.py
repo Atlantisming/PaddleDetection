@@ -271,6 +271,7 @@ class OVHungarianMatcher_ori(nn.Layer):
 
         self.giou_loss = GIoULoss()
 
+    @paddle.no_grad()
     def forward(self, boxes, logits, gt_bbox, gt_class):
         r"""
         Args:
@@ -368,6 +369,7 @@ class OVHungarianMatcher(OVHungarianMatcher_ori):
             alpha=alpha,
             gamma=gamma)
 
+    @paddle.no_grad()
     def forward(self, boxes, logits, gt_bbox, gt_class, select_id):
         r"""
         Args:

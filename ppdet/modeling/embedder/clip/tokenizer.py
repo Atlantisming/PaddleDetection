@@ -168,7 +168,7 @@ class SimpleTokenizer(object):
             'utf-8', errors="replace").replace('</w>', ' ')
         return text
 
-def tokenize(texts, context_length=77):
+def tokenize(texts, context_length=77, bpe_path=default_bpe()):
     """
     Returns the tokenized representation of given input string(s)
     Parameters
@@ -184,7 +184,7 @@ def tokenize(texts, context_length=77):
     if isinstance(texts, str):
         texts = [texts]
 
-    tokenizer = build_tokenizer()
+    tokenizer = build_tokenizer(bpe_path)
 
 
     sot_token = tokenizer.encoder["<|startoftext|>"]

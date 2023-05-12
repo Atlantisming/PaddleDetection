@@ -124,7 +124,7 @@ class OVDETR(DETR):
                  prob=0.5,
                  with_box_refine=True,
                  two_stage=True,
-                 zeroshot_w=build_text_embedding_coco(),
+                 bpe_path='/home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/embedder/clip/bpe_simple_vocab_16e6.txt.gz',
                  clip_feat_path='/home/a401-2/PycharmProjects/PaddleDetection/ppdet/modeling/transformers/clip_feat_coco_pickle_label.pkl',
                  post_process='DETRBBoxPostProcess',
                  exclude_post_process=False):
@@ -137,7 +137,7 @@ class OVDETR(DETR):
         if neck is not None:
             self.neck = neck
 
-        self.zeroshot_w = zeroshot_w.t()
+        self.zeroshot_w = build_text_embedding_coco(bpe_path).t()
         self.patch2query = nn.Linear(512, 256)
         self.patch2query_img = nn.Linear(512, 256)
         # mark 源码此处for layer in [self.patch2query]:
