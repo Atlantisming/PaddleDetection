@@ -202,6 +202,7 @@ class TextEncoder(nn.Layer):
         # self.dtype = clip_model.dtype
         self.token_embedding = clip_model.token_embedding
 
+    @paddle.no_grad()
     def forward(self, text):
         x = self.token_embedding(text).astype('float32')  # [batch_size, n_ctx, d_model]
         x = x + self.positional_embedding.astype('float32')

@@ -144,7 +144,6 @@ class OVDETR(DETR):
         xavier_uniform_(self.patch2query.weight)
         constant_(self.patch2query.bias, 0)
 
-        # self.num_pred = self.decoder.num_layers + 1
         self.all_ids = paddle.to_tensor(list(range(self.zeroshot_w.shape[-1])))
         self.max_len = max_len
         self.max_pad_len = self.max_len - 3
@@ -154,38 +153,12 @@ class OVDETR(DETR):
         self.prob = prob
         self.two_stage = two_stage
         if with_box_refine:
-            # constant_(self.bbox_head[0].layers[be_last].bias[2:], -2.0)
-            # hack implementation for iterative bounding box refinement
             self.transformer.decoder.bbox_head = self.detr_head.bbox_head
         else:
-            # constant_(self.bbox_head.layers[be_last].bias[2:], -2.0)
-            # self.score_head = nn.LayerList([self.score_head for _ in range(self.num_pred)])
-            # self.bbox_head = nn.LayerList([self.bbox_head for _ in range(self.num_pred)])
             self.transformer.decoder.bbox_head = None
 
         if two_stage:
             self.transformer.decoder.score_head = self.detr_head.score_head
-            # self.enc_output = nn.Linear(hidden_dim, hidden_dim, bias_attr=True)
-            # self.enc_output_norm = nn.LayerNorm(hidden_dim)
-            # self.pos_trans = nn.Linear(hidden_dim * 2, hidden_dim * 2, bias_attr=True)
-            # self.pos_trans_norm = nn.LayerNorm(hidden_dim * 2)
-        else:
-            # self.query_embed = nn.Embedding(num_queries, hidden_dim * 2)
-            self.reference_points = nn.Linear(
-                hidden_dim,
-                2,
-                weight_attr=ParamAttr(learning_rate=lr_mult),
-                bias_attr=ParamAttr(learning_rate=lr_mult))
-            normal_(self.query_embed.weight)
-            self._reset_parameters()
-
-    def _reset_parameters(self):
-        normal_(self.level_embed.weight)
-        # normal_(self.tgt_embed.weight)
-        # normal_(self.query_pos_embed.weight)
-        if not self.two_stage:
-            xavier_uniform_(self.reference_points.weight)
-            constant_(self.reference_points.bias)
 
     @classmethod
     def from_config(cls, cfg, *args, **kwargs):

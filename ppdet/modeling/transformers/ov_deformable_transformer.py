@@ -70,7 +70,6 @@ class MSDeformableAttention(nn.Layer):
             bias_attr=ParamAttr(learning_rate=lr_mult))
 
         self.attention_weights = nn.Linear(embed_dim, self.total_points, bias_attr=True)
-        # TODO check embed_dim 256*3 or 256
         self.value_proj = nn.Linear(embed_dim, embed_dim, bias_attr=True)
 
         self.output_proj = nn.Linear(embed_dim, embed_dim, bias_attr=True)
@@ -446,7 +445,7 @@ class OVDeformableTransformer(nn.Layer):
         self.nhead = nhead
         self.two_stage = two_stage
         self.two_stage_num_proposals = two_stage_num_proposals
-        self.num_feature_levels = num_feature_levels
+        # self.num_feature_levels = num_feature_levels
 
         encoder_layer = DeformableTransformerEncoderLayer(
             hidden_dim, nhead, dim_feedforward, dropout, activation,
@@ -511,7 +510,7 @@ class OVDeformableTransformer(nn.Layer):
         with paddle.no_grad():
             dim_t = paddle.arange(num_pos_feats)
         # dim_t = paddle.arange(num_pos_feats)
-            dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats).astype('float32')
+        dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats).astype('float32')
         # N, L, 4
         proposals = F.sigmoid(proposals) * scale
         # N, L, 4, 128
@@ -521,32 +520,33 @@ class OVDeformableTransformer(nn.Layer):
         return pos
 
     def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes):
-        N_, S_, C_ = memory.shape
-        proposals = []
-        _cur = 0
-        memory_padding_mask = memory_padding_mask.astype('bool')
-        for lvl, (H_, W_) in enumerate(spatial_shapes):
-            mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].reshape((N_, H_, W_, 1))
-            valid_H = paddle.sum(mask_flatten_[:, :, 0, 0], 1)
-            valid_W = paddle.sum(mask_flatten_[:, 0, :, 0], 1)
+        with paddle.no_grad():
+            N_, S_, C_ = memory.shape
+            proposals = []
+            _cur = 0
+            memory_padding_mask = memory_padding_mask.astype('bool')
+            for lvl, (H_, W_) in enumerate(spatial_shapes):
+                mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].reshape((N_, H_, W_, 1))
+                valid_H = paddle.sum(mask_flatten_[:, :, 0, 0], 1)
+                valid_W = paddle.sum(mask_flatten_[:, 0, :, 0], 1)
 
-            grid_y, grid_x = paddle.meshgrid(paddle.linspace(0, H_ - 1, H_, 'float32'),
-                                             paddle.linspace(0, W_ - 1, W_, 'float32'))
-            grid = paddle.concat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)
+                grid_y, grid_x = paddle.meshgrid(paddle.linspace(0, H_ - 1, H_, 'float32'),
+                                                 paddle.linspace(0, W_ - 1, W_, 'float32'))
+                grid = paddle.concat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)
 
-            scale = paddle.concat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).reshape((N_, 1, 1, 2))
-            grid = (paddle.expand(grid.unsqueeze(0), [N_, -1, -1, -1]) + 0.5) / scale
+                scale = paddle.concat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).reshape((N_, 1, 1, 2))
+                grid = (paddle.expand(grid.unsqueeze(0), [N_, -1, -1, -1]) + 0.5) / scale
 
-            wh = paddle.ones_like(grid) * 0.05 * (2.0 ** lvl)
-            proposal = paddle.concat((grid, wh), -1).reshape((N_, -1, 4))
-            proposals.append(proposal)
-            _cur += (H_ * W_)
+                wh = paddle.ones_like(grid) * 0.05 * (2.0 ** lvl)
+                proposal = paddle.concat((grid, wh), -1).reshape((N_, -1, 4))
+                proposals.append(proposal)
+                _cur += (H_ * W_)
 
-        output_proposals = paddle.concat(proposals, 1)
-        output_proposals_valid = ((output_proposals > 0.01) & (output_proposals < 0.99)).all(-1, keepdim=True)
-        output_proposals = paddle.log(output_proposals / (1 - output_proposals))
-        output_proposals = masked_fill(output_proposals, ~memory_padding_mask.unsqueeze(-1), float('inf'))
-        output_proposals = masked_fill(output_proposals, ~output_proposals_valid, float('inf'))
+            output_proposals = paddle.concat(proposals, 1)
+            output_proposals_valid = ((output_proposals > 0.01) & (output_proposals < 0.99)).all(-1, keepdim=True)
+            output_proposals = paddle.log(output_proposals / (1 - output_proposals))
+            output_proposals = masked_fill(output_proposals, ~memory_padding_mask.unsqueeze(-1), float('inf'))
+            output_proposals = masked_fill(output_proposals, ~output_proposals_valid, float('inf'))
 
         output_memory = memory
         output_memory = masked_fill(output_memory, ~memory_padding_mask.unsqueeze(-1), float(0))
@@ -590,11 +590,11 @@ class OVDeformableTransformer(nn.Layer):
         lvl_pos_embed_flatten = paddle.concat(lvl_pos_embed_flatten, 1)
         # [l, 2]
         spatial_shapes = paddle.to_tensor(
-            paddle.stack(spatial_shapes).astype('int64'))
+            paddle.stack(spatial_shapes).astype('int32'))
         # [l], 每一个level的起始index
         level_start_index = paddle.concat([
             paddle.zeros(
-                [1], dtype='int64'), spatial_shapes.prod(1).cumsum(0)[:-1]
+                [1], dtype='int32'), spatial_shapes.prod(1).cumsum(0)[:-1]
         ])
         # [b, l, 2]
         valid_ratios = paddle.stack(valid_ratios, 1)
