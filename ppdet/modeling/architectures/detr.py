@@ -168,7 +168,6 @@ class OVDETR(DETR):
         neck = create(cfg['neck'], **kwargs)
         # transformer
         transformer = create(cfg['transformer'])
-        # transformer = create(cfg['transformer'])
 
         # head
         kwargs = {
@@ -250,6 +249,7 @@ class OVDETR(DETR):
         loss = self.detr_head(head_inputs_dict, body_feats, self.inputs)
         # print('loss', loss)
         # print('sum', sum(loss[k] for k in loss.keys()))
+        paddle.device.cuda.empty_cache()
 
         return loss
 

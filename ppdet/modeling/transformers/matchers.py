@@ -126,126 +126,6 @@ class HungarianMatcher(nn.Layer):
             j, dtype=paddle.int64)) for i, j in indices]
 
 
-# @register
-# @serializable
-# class OVHungarianMatcher(HungarianMatcher):
-#     __shared__ = ['use_focal_loss']
-#
-#     def __init__(self,
-#                  matcher_coeff={'class': 1,
-#                                 'bbox': 5,
-#                                 'giou': 2},
-#                  use_focal_loss=False,
-#                  alpha=0.25,
-#                  gamma=2.0):
-#         self.use_focal_loss = use_focal_loss
-#         super(OVHungarianMatcher, self).__init__(
-#                  matcher_coeff=matcher_coeff,
-#                  use_focal_loss=use_focal_loss,
-#                  alpha=alpha,
-#                  gamma=gamma)
-#
-#     def forward(self, boxes, logits, gt_bbox, gt_class, select_id):
-#         r"""
-#         Args:
-#             boxes (Tensor): [b, query, 4]
-#             logits (Tensor): [b, query, num_classes]
-#             gt_bbox (List(Tensor)): list[[n, 4]]
-#             gt_class (List(Tensor)): list[[n, 1]]
-#             select_id (List(Tensor)): List[max_len]
-#
-#         Returns:
-#             A list of size batch_size, containing tuples of (index_i, index_j) where:
-#                 - index_i is the indices of the selected predictions (in order)
-#                 - index_j is the indices of the corresponding selected targets (in order)
-#             For each batch element, it holds:
-#                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
-#         """
-#         num_patch = len(select_id)
-#         bs, num_queries = boxes.shape[:2]
-#
-#         num_gts = sum(len(a) for a in gt_class)
-#         if num_gts == 0:
-#             return [(paddle.to_tensor(
-#                 [], dtype=paddle.int64), paddle.to_tensor(
-#                 [], dtype=paddle.int64)) for _ in range(bs)]
-#
-#         num_queries = num_queries // num_patch
-#
-#         out_prob_all = paddle.reshape(logits, [bs, num_patch, num_queries, -1])
-#         out_bbox_all = paddle.reshape(boxes, [bs, num_patch, num_queries, -1])
-#
-#         # Also concat the target labels and boxes
-#         tgt_ids_all = paddle.concat(gt_class).flatten()
-#         tgt_bbox_all = paddle.concat(gt_bbox)
-#
-#         ans = [[[], []] for _ in range(bs)]
-#
-#         for index, label in enumerate(select_id):
-#             out_prob = F.sigmoid(out_prob_all[:, index, :, :].flatten(0, 1))
-#             out_bbox = out_bbox_all[:, index, :, :].flatten(0, 1)
-#
-#             mask = (tgt_ids_all == label).nonzero().squeeze(1)
-#
-#             if len(mask) > 0:
-#                 tgt_bbox = tgt_bbox_all.index_select(mask, axis=0)
-#                 tgt_ids = tgt_ids_all.index_select(mask, axis=0)
-#
-#                 # Compute the classification cost.
-#                 neg_cost_class = (1 - self.alpha) * (out_prob ** self.gamma) * (-paddle.log(1 - out_prob + 1e-8))
-#                 pos_cost_class = self.alpha * ((1 - out_prob) ** self.gamma) * (-paddle.log(out_prob + 1e-8))
-#                 # cost_class = paddle.gather(
-#                 #     pos_cost_class, tgt_ids, axis=1) - paddle.gather(
-#                 #     neg_cost_class, tgt_ids, axis=1)
-#                 cost_class = pos_cost_class.index_select(paddle.to_tensor([0]), axis=1) \
-#                              - neg_cost_class.index_select(paddle.to_tensor([0]), axis=1)
-#
-#                 # Compute the L1 cost between boxes
-#                 # cost_bbox = (out_bbox - tgt_bbox).abs().sum(-1)
-#
-#                 num_all_target_boxes = tgt_bbox.shape[0]
-#                 expanded_out_bbox = paddle.expand(paddle.unsqueeze(out_bbox, [1]),
-#                                                   [bs * num_queries, num_all_target_boxes,
-#                                                    4])  # [batch_size * num_queries, num_all_target_boxes, 4]
-#                 expanded_tgt_bbox = paddle.expand(paddle.unsqueeze(tgt_bbox, [0]),
-#                                                   [bs * num_queries, num_all_target_boxes,
-#                                                    4])  # [batch_size * num_queries, num_all_target_boxes, 4]
-#                 cost_bbox = F.loss.l1_loss(expanded_out_bbox, expanded_tgt_bbox,
-#                                            reduction='none')  # [batch_size * num_queries, num_all_target_boxes,4]
-#                 cost_bbox = paddle.sum(cost_bbox, -1)
-#
-#                 # Compute the giou cost betwen boxes
-#                 cost_giou = self.giou_loss(
-#                     bbox_cxcywh_to_xyxy(expanded_out_bbox),
-#                     bbox_cxcywh_to_xyxy(expanded_tgt_bbox)).squeeze(-1)
-#
-#                 # Final cost matrix
-#                 C = (self.matcher_coeff['class'] * cost_class
-#                      + self.matcher_coeff['bbox'] * cost_bbox
-#                      + self.matcher_coeff['giou'] * cost_giou)
-#
-#                 # C = C.reshape([bs, num_queries, -1])
-#                 # C = [a for a in C.chunk(bs)]
-#                 C = paddle.reshape(C, [bs, num_queries, -1])
-#                 # TODO bs=2 ?
-#                 sizes = [len(a[a == label]) for a in gt_class]
-#                 indices = [
-#                     linear_sum_assignment(c.split(sizes, -1)[i].numpy())
-#                     for i, c in enumerate(C)
-#                 ]
-#
-#                 for ind in range(bs):
-#                     x, y = indices[ind]
-#                     if len(x) == 0:
-#                         continue
-#                     x += index * num_queries
-#                     ans[ind][0] += x.tolist()
-#                     y_label = (gt_class[ind].squeeze(1) == label).nonzero().squeeze(1).cpu().numpy()
-#                     y_label = y_label[y].tolist()
-#                     ans[ind][1] += y_label
-#         return [(paddle.to_tensor(i, dtype="int64"), paddle.to_tensor(j, dtype="int64"))
-#                 for i, j in ans]
-
 @register
 @serializable
 class OVHungarianMatcher_ori(nn.Layer):
@@ -340,8 +220,9 @@ class OVHungarianMatcher_ori(nn.Layer):
         # C = C.reshape([bs, num_queries, -1])
         # C = [a for a in C.chunk(bs)]
         C = paddle.reshape(C, [bs, num_queries, -1])
+        C = [a.squeeze(0) for a in C.chunk(bs)]
 
-        sizes = [a.shape[0] for a in gt_class]
+        sizes = [a.shape[0] for a in gt_bbox]
         indices = [
             linear_sum_assignment(c.split(sizes, -1)[i].numpy())
             for i, c in enumerate(C)
@@ -403,6 +284,11 @@ class OVHungarianMatcher(OVHungarianMatcher_ori):
         # Also concat the target labels and boxes
         tgt_ids_all = paddle.concat(gt_class).flatten()
         tgt_bbox_all = paddle.concat(gt_bbox)
+        print('tgt_ids_all', tgt_ids_all)
+        print('tgt_bbox_all', tgt_bbox_all)
+        print('gt_class', gt_class)
+        print('gt_bbox', gt_bbox)
+
 
         ans = [[[], []] for _ in range(bs)]
 
@@ -414,7 +300,7 @@ class OVHungarianMatcher(OVHungarianMatcher_ori):
 
             if len(mask) > 0:
                 tgt_bbox = tgt_bbox_all.index_select(mask, axis=0)
-                tgt_ids = tgt_ids_all.index_select(mask, axis=0)
+                # tgt_ids = tgt_ids_all.index_select(mask, axis=0)
 
                 # Compute the classification cost.
                 neg_cost_class = (1 - self.alpha) * (out_prob ** self.gamma) * (-paddle.log(1 - out_prob + 1e-8))
@@ -452,8 +338,16 @@ class OVHungarianMatcher(OVHungarianMatcher_ori):
                 # C = C.reshape([bs, num_queries, -1])
                 # C = [a for a in C.chunk(bs)]
                 C = paddle.reshape(C, [bs, num_queries, -1])
-                # TODO bs=2 ?
-                sizes = [len(a[a == label]) for a in gt_class]
+                print(C)
+
+                # sizes = [len(a[a == label]) for a in gt_class]
+                sizes = []
+                for a in gt_class:
+                    if len(a) > 0:
+                        mask = a == label
+                        sizes.append(len(paddle.masked_select(a, mask)))
+                print(sizes)
+
                 indices = [
                     linear_sum_assignment(c.split(sizes, -1)[i].numpy())
                     for i, c in enumerate(C)
@@ -468,6 +362,7 @@ class OVHungarianMatcher(OVHungarianMatcher_ori):
                     y_label = (gt_class[ind].squeeze(1) == label).nonzero().squeeze(1).cpu().numpy()
                     y_label = y_label[y].tolist()
                     ans[ind][1] += y_label
+        exit()
 
         return [(paddle.to_tensor(i, dtype="int64"), paddle.to_tensor(j, dtype="int64"))
                 for i, j in ans]

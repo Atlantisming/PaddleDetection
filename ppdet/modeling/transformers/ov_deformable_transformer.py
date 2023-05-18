@@ -615,10 +615,10 @@ class OVDeformableTransformer(nn.Layer):
                 memory, mask_flatten, spatial_shapes)
 
             # hack implementation for two-stage Deformable DETR
-            enc_outputs_class = self.decoder.score_head[6](output_memory)
+            enc_outputs_class = self.decoder.score_head[-1](output_memory)
             # print('output_proposals',output_proposals)
             # print('self.decoder.bbox_head(output_memory)', self.decoder.bbox_head(output_memory))
-            enc_outputs_coord_unact = self.decoder.bbox_head[6](output_memory) + output_proposals
+            enc_outputs_coord_unact = self.decoder.bbox_head[-1](output_memory) + output_proposals
             topk = self.two_stage_num_proposals
             topk_proposals = paddle.topk(enc_outputs_class[..., 0], topk, axis=1)[1]
 

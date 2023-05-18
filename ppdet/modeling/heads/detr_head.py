@@ -427,8 +427,8 @@ class OVDeformableDETRHead(nn.Layer):
         self.hidden_dim = hidden_dim
         self.nhead = nhead
         self.loss = loss
-        self.cls_out_channels = cls_out_channels
-        self.num_decoder_layer = num_decoder_layer
+        # self.cls_out_channels = cls_out_channels
+        # self.num_decoder_layer = num_decoder_layer
 
         self.score_head = nn.Linear(hidden_dim, cls_out_channels)
         self.bbox_head = MLP(hidden_dim,
